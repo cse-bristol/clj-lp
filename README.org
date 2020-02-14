@@ -13,3 +13,10 @@ A library to help integrate lp solvers with clojure.
 #+END_EXAMPLE
 
 Or whatever.
+
+* TODO Two-sided bounds
+* TODO Logical conjunctions in constraints
+* TODO Remove dead constraints
+* TODO Read more status information from SCIP
+* TODO Add convenient evaluation function
+* TODO Add piecewise linearizer
