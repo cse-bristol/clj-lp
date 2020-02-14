@@ -1,0 +1,15 @@
+#+TITLE: Linear programming in clojure
+
+A library to help integrate lp solvers with clojure.
+
+#+BEGIN_EXAMPLE clj
+  (require '[lp.glpk :as glpk])
+
+  (glpk/solve
+    {:maximize [:+ [:* 2 :x] [:+ :y :z]]
+     :subject-to [[:<= [:+ :x :z] 3]
+                  [:<= :y :x]]
+     :vars {:x {} :y {} :z {}}})
+#+END_EXAMPLE
+
+Or whatever.
