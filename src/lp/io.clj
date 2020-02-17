@@ -76,11 +76,11 @@
        (print-sum (:objective lp) :constant-value true)
 
        ;; constraints
-       (when-let [cons (seq (:constraints lp))]
+       (when-let [cons (seq (lp/constraint-bodies lp))]
          (println)
          (println)
          (println "subject to")
-         (doseq [[n {body :body ub :upper lb :lower}] cons]
+         (doseq [{body :body ub :upper lb :lower} cons]
            (let [constant-term (or (lp/constant-value body) 0)
                  lb (and lb (- lb constant-term))
                  ub (and ub (- ub constant-term))
@@ -169,7 +169,7 @@
         {n-binary-vars :binary n-integer-vars :integer}
         (frequencies (map (comp :type second) var-order))
 
-        constraints (vals (:constraints lp))
+        constraints (lp/constraint-bodies lp)
         
         n-constraints       (count constraints)
         n-objectives        1

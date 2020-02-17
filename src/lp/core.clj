@@ -7,6 +7,7 @@
 (defrecord Sum [terms]) ;; {a 1 b 2} => a + 2b
 (defrecord Program [sense objective vars constraints])
 (defrecord Constraint [body lower upper]) ;; lower <= body <= upper, allowing nil for l and u
+(defrecord Conjunction [body]) ;; AND x y z
 (defrecord Abnormal [fn args]) ;; something which could not be normalized
 
 (defn expression-type [expr]
@@ -17,8 +18,11 @@
     (boolean? expr)   :boolean
 
     (instance? Product expr)  :product
-    (instance? Sum expr)      :sum
     (instance? Abnormal expr) :abnormal
+
+    (or (instance? Sum expr)
+        (instance? Constraint expr)
+        (instance? Conjunction expr)) :identity
     
     (vector? expr)   (first expr) ;; operator
 
@@ -45,6 +49,10 @@
 (defn is-one?  [x] (is-constant? x 1))
 (defn is-zero? [x] (is-constant? x 0))
 
+(defn is-logical? [x]
+  (or (instance? Constraint x)
+      (instance? Conjunction x)))
+
 (defn constant-value [x]
   (or
    (cond
@@ -66,7 +74,7 @@
       ;; v^1
       (Sum. {(Product. {x 1}) 1}))))
 (defmethod norm-expr :product  [x] (Sum. {x 1})) 
-(defmethod norm-expr :sum      [x] x)
+(defmethod norm-expr :identity [x] x)
 (defmethod norm-expr :abnormal [x] (Sum. {(Product. {x 1}) 1})) ;; x^1 × 1
 
 (defmethod norm-expr :*        [[_ & args]]
@@ -179,12 +187,40 @@
             ]
         (Constraint. delta nil (- k)))
       
-      ;; (= 3 (count args)) ;; TODO this
+      (= 3 (count args))
+      (let [[lb mid ub] args]
+        (cond
+          (and (is-constant? lb)
+               (is-constant? ub))
+          (let [constant-term (constant-value mid)]
+            (Constraint. (norm-expr `[:- ~mid ~constant-term])
+                         (- (constant-value lb) constant-term)
+                         (- (constant-value ub) constant-term)))
+              
+          :else
+          (norm-expr `[:and
+                       [:<= ~lb ~mid]
+                       [:<= ~mid ~ub]])))
 
       :else (throw (ex-info "Constraints can only be < x y or < l x u"))
-      )
-    )
-  )
+      )))
+
+(defmethod norm-expr :and      [[_ & args]]
+  ;; several constraints which are all true
+  (let [args (doall (map norm-expr args))]
+    (if (every? is-logical? args)
+      (Conjunction.
+       (reduce
+        (fn [acc arg]
+          (cond
+            (instance? Constraint arg)
+            (conj acc arg)
+
+            ;; fold up other conjunctions
+            (instance? Conjunction arg)
+            (concat acc (:body arg))))
+        args))
+      (throw (ex-info ":and only applicable to constraints or other ands" {:args args})))))
 
 (defmethod norm-expr :=        [[_ & args]]
   ;; for our two expressions to be equal, they must sum to zero
@@ -255,8 +291,12 @@
     (and (= exponents #{1.0 0.0})
          (< (count (get by-exponent 1.0)) 2))))
 
+(defmethod linear? Conjunction [x]
+  (every? linear? (:body x)))
+
 (defmethod linear? Constraint [x]
   (linear? (:body x)))
+
 (defmethod linear? Program [x]
   (and (linear? (:objective x))
        (every? linear? (vals (:constraints x)))))
@@ -268,3 +308,19 @@
    lp :vars
    #(merge-with merge %1 %2) ;; this will add :value if it was missing.
    vars))
+
+(defn constraint-bodies
+  "Given a normalized LP, get all the constraint bodies, ignoring their names.
+  Why do we have names?"
+  [lp]
+
+  (apply concat
+         (for [[n c] (:constraints lp)]
+           (cond
+             (instance? Constraint c)
+             [c]
+
+             (instance? Conjunction c)
+
+             (:body c)))))
+
