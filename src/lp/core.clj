@@ -1,5 +1,6 @@
 (ns lp.core
-  (:require [clojure.set :refer [map-invert]]))
+  (:require [clojure.set :refer [map-invert]]
+            [com.rpl.specter :as s]))
 
 (def ^:dynamic *lp-vars* #{})
 
@@ -219,6 +220,7 @@
             ;; fold up other conjunctions
             (instance? Conjunction arg)
             (concat acc (:body arg))))
+        nil
         args))
       (throw (ex-info ":and only applicable to constraints or other ands" {:args args})))))
 
