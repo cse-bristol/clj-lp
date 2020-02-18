@@ -50,6 +50,12 @@
 (defn is-one?  [x] (is-constant? x 1))
 (defn is-zero? [x] (is-constant? x 0))
 
+(defn simplify-product [p]
+  (let [factors (remove (comp is-zero? second)
+                        (:factors p))]
+    (if (empty? factors)
+      1 (Product. (into {} factors)))))
+
 (defn is-logical? [x]
   (or (instance? Constraint x)
       (instance? Conjunction x)))
@@ -93,19 +99,25 @@
                    :let [wc (* wa wb)]
                    :when (not (zero? wc))]
                [(cond
-                  (= 1 ka) kb
-                  (= 1 kb) ka
+                  (is-one? ka) kb
+                  (is-one? kb) ka
 
                   (and (instance? Product ka)
                        (instance? Product kb))
-                  ;; TODO x^0 = 1
-                  (-> (Product. (merge-with + (:factors ka) (:factors kb))))
-                  
+                  (Product. (merge-with + (:factors ka) (:factors kb)))
+
                   :else (throw (ex-info "Can't multiply these" {:a ka :b kb})))
                 wc])
-             (into {})
+             (reduce ;; roll up any products that came out twice
+              (fn [acc [term mul]]
+                (if (zero? mul)
+                  acc
+                  (let [term (if (instance? Product term)
+                               (simplify-product term) ;; in case it's now actually just 1
+                               term)]
+                    (assoc acc term (+ mul (get acc term 0))))))
+              {})
              (Sum.))
-
         :else
         (throw (ex-info "Unable to mul" {:val val}))))
     ONE
@@ -153,6 +165,14 @@
   (let [n (norm-expr n)
         d (norm-expr d)]
     (cond
+      (and (is-zero? n) (is-zero? d))
+      (norm-expr ##NaN)
+      
+      (is-zero? d)
+      (norm-expr ##Inf)
+      
+      (= n d) (norm-expr 1)
+      
       (is-constant? d)
       (norm-expr [:* n (/ 1.0 (constant-value d))])
 
@@ -244,7 +264,7 @@
     (assoc :lower 0 :upper 1)))
 
 (defn normalize
-  "Given `lp`, return a normalized form of it.
+  "Given `lp`, return a normalized form of it, unless already done.
 
   In the normalized form:
   - Variable names are the same
@@ -252,34 +272,37 @@
   - Constraints are not fixed up for canonical form
   "
   [lp]
-  (binding [*lp-vars* (:vars lp)]
-    (let [tidy-constraints
-          #(if (map? %) %
-               (into {} (map-indexed vector %)))
+  
+  (if (instance? Program lp)
+    lp
+    (binding [*lp-vars* (:vars lp)]
+      (let [tidy-constraints
+            #(if (map? %) %
+                 (into {} (map-indexed vector %)))
 
-          {obj :objective min :minimize max :maximize
-           subject-to :subject-to
-           constraints :constraints}
-          lp
-          lp (cond-> lp (not obj)
-               (cond-> 
-                   min (-> (assoc :sense :minimize :objective min)
-                           (dissoc :minimize))
-                   max (-> (assoc :sense :maximize :objective max)
-                           (dissoc :maximize))
-                   constraints (update :constraints tidy-constraints)
-                   subject-to  (-> (update :constraints merge
-                                           (tidy-constraints subject-to))
-                                   (dissoc :subject-to))
-                   ))
+            {obj :objective min :minimize max :maximize
+             subject-to :subject-to
+             constraints :constraints}
+            lp
+            lp (cond-> lp (not obj)
+                       (cond-> 
+                           min (-> (assoc :sense :minimize :objective min)
+                                   (dissoc :minimize))
+                           max (-> (assoc :sense :maximize :objective max)
+                                   (dissoc :maximize))
+                           constraints (update :constraints tidy-constraints)
+                           subject-to  (-> (update :constraints merge
+                                                   (tidy-constraints subject-to))
+                                           (dissoc :subject-to))
+                           ))
 
-          lp (->> lp
-                  (s/transform [:vars s/MAP-VALS] add-bounds)
-                  (s/transform [:constraints s/MAP-VALS] norm-expr)
-                  (s/transform [:objective] norm-expr))
-          ]
-      ;; Convert to normalized program record
-      (map->Program lp))))
+            lp (->> lp
+                    (s/transform [:vars s/MAP-VALS] add-bounds)
+                    (s/transform [:constraints s/MAP-VALS] norm-expr)
+                    (s/transform [:objective] norm-expr))
+            ]
+        ;; Convert to normalized program record
+        (map->Program lp)))))
 
 (defmulti linear? class)
 
@@ -326,3 +349,31 @@
 
              (:body c)))))
 
+(defmethod print-method Sum [x ^java.io.Writer w]
+  (print-method
+   `[:+ ~@(for [[t m] (:terms x) :when (not (is-zero? m))]
+            (if (is-one? m)
+              t
+              [:* m t]
+              )
+            )]
+   w))
+
+(defmethod print-method Product [x ^java.io.Writer w]
+  (print-method
+   (if (= 1 (count (:factors x)))
+     (let [[x n] (first (:factors x))]
+       (if (is-one? n) x [:** x n]))
+     `[:* ~@(for [[x n] (:factors x)]
+              (if (is-one? n) x [:** x n]))])
+   w))
+
+;; (defn linear-coefficients [expr]
+;;   (when (instance? Sum expr)
+;;     (for [[k m] (:terms expr)
+;;           :when-not (zero? m) ;; 0x = 0
+;;           :when-not (and (number? k) (== 1 k))
+;;           ]
+      
+;;       )
+;;     ))

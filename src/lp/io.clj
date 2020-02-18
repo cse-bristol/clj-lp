@@ -338,16 +338,16 @@
   (println
    (:program
     (nl {:vars {:x {:type :non-negative}
-                   :y {:type :binary}
-                   :z {:type :non-negative}}
-            :objective [:+ :x [:* 3 :y] [:- [:* 2 :z]]]
-            :sense :maximize
-            :constraints {:con1 [:<= :x [:* 2 :z]] 
-                          :con2 [:and
-                                 [:= 1 :z]
-                                 [:>= :z :y]]
-                          :con3 [:<= 3 [:- :x :y] 19]
-                          }
-            })))
+                :y {:type :binary}
+                :z {:type :non-negative}}
+         :objective [:+ :x [:* 3 :y] [:- [:* 2 :z]]]
+         :sense :maximize
+         :constraints {:con1 [:<= :x [:* 2 :z]] 
+                       :con2 [:and
+                              [:= 1 :z]
+                              [:>= :z :y]]
+                       :con3 [:<= 3 [:- :x :y] 19]
+                       }
+         })))
   
   )
