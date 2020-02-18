@@ -1,7 +1,8 @@
 (ns lp.io
   (:require [lp.core :as lp]
             [clojure.java.io :as io]
-            [clojure.set :refer [map-invert]])
+            [clojure.set :refer [map-invert]]
+            [clojure.string :as s])
   
   (:import [java.nio.file Path Files]))
 
@@ -48,25 +49,23 @@
 
         print-sum
         (fn [sum & {:keys [constant-value]}]
-          (let [obj (:terms sum)]
-            (doseq [[term factor] obj]
-              (when-not (or (lp/is-zero? factor)
-                            (and (not constant-value)
-                                 (lp/is-one? term))
-                            )
-                (if (>= factor 0)
+          (let [grad (lp/linear-coefficients sum)]
+            (doseq [[x k] grad]
+              (when-not (or (lp/is-zero? k)
+                            (and (not constant-value) (= :c x)))
+                (if (>= k 0)
                   (print "+ ")
                   (print "- "))
                 
-                (when-not (== 1 (Math/abs factor))
-                  (print (Math/abs factor))
+                (when-not (== 1 (Math/abs k))
+                  (print (Math/abs k))
                   (print " "))
                 
-                (when-not (lp/is-one? term)
-                  (let [var (-> (:factors term) first first)]
-                    (print (str "x" (get var-index var))))
+                (when-not (= :c x)
+                  (print (str "x" (get var-index x)))
                   
-                  (print " "))))))]
+                  (print " "))))
+            ))]
 
     {:index-to-var var-rindex
      :var-to-index var-index
@@ -175,7 +174,6 @@
         n-objectives        1
         n-range-constraints 0
         n-eq-constraints    (count (filter #{:=} (map first constraints)))
-
         
         n-linear-constraints n-constraints
 
@@ -207,11 +205,9 @@
         
         print-gradient
         (fn [x]
-          (when (instance? lp.core.Sum x)
-            (doseq [[t k] (:terms x)]
-              ;; each thing in here should be a single Product
-              ;; which should either be a linear term or a constant
-              (when-let [i (factor-index t)]
+          (let [gradient (lp/linear-coefficients x)]
+            (doseq [[x k] gradient]
+              (when-let [i (var-to-index x)]
                 (println i k)))))
 
         print-bound
@@ -272,13 +268,14 @@
 
        (doindexed [i constraint constraints]
          (printf "C%d\n" i)
+         ;; TODO I think this below is wrong, but not a problem
          (printf "n%s\n" (lp/constant-value (:body constraint)))
          )
 
        ;; objective sense
        (printf "O0 %d\n" (if (= :maximize (:sense lp)) 1 0))
 
-       ;; objective body; again constant 0 because linear
+       ;; objective body
        (printf "n%s\n" (lp/constant-value (:objective lp)))
 
        ;; dual and primal values for variables
@@ -334,6 +331,67 @@
      }
     ))
 
+(defn sol
+  "Read a sol file into some vars
+  Sol files are not well-documented
+
+  https://github.com/Pyomo/pyomo/blob/0c13b88e6cb9d42ff415dfbc896dc3902dd7dc7d/pyomo/opt/plugins/sol.py as a reference.
+
+  Sol file format seems to be
+
+  Arbitrary junk
+
+  Options                                  | A line that starts options
+  n                                        | an integer; if > 4 something weird?
+  o1                                       | option val 1
+  o2                                       | ...
+  o(n+1)                                   | [nopts]
+  o(n+2)                                   | # constraints M
+  o(n+3)                                   |
+  o(n+4)                                   | # vars N
+  M floats (constraint vals?)
+  N floats (variable vals?)
+  objno x y  (x and y are codes)
+  "
+  [text var-index]
+
+  (let [lines              (remove s/blank? (s/split-lines text))
+        [junk _ lines]     (partition-by #{"Options"} lines)
+        [num-opts & lines] lines
+        num-opts           (Integer/parseInt num-opts)
+        weird              (> num-opts 4) ;; no idea what this means
+        num-opts           (if weird (- num-opts 2) num-opts)
+        [opt-vals lines]   (split-at (+ (if weird 5 4) num-opts) lines) ;; not sure why + 4
+
+        ;; these are the only two values in here that we use
+        n-vars (Integer/parseInt (nth opt-vals (+ num-opts 3)))
+        n-cons (Integer/parseInt (nth opt-vals (+ num-opts 1)))
+
+        [cons-vals lines]  (split-at n-cons lines)
+        [var-vals lines]   (split-at n-vars lines)
+
+        read-double #(Double/parseDouble %)
+        cons-vals (map read-double cons-vals)
+        var-vals  (map read-double var-vals)
+
+        [objno & lines] lines
+        
+        ]
+    {:vars
+     (->> (map-indexed
+           (fn [i v]
+             [(get var-index i)
+              {:value v}])
+           var-vals)
+          (into {}))}
+    
+    ;; {:vars var-vals
+    ;;  :cons cons-vals
+    ;;  :objno objno
+    ;;  }
+
+    ))
+
 (comment
   (println
    (:program
@@ -348,6 +406,4 @@
                               [:>= :z :y]]
                        :con3 [:<= 3 [:- :x :y] 19]
                        }
-         })))
-  
-  )
+         }))))

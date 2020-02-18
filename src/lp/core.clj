@@ -31,19 +31,18 @@
                                                      :vars *lp-vars*
                                                      }))))
 
-(def ZERO (Sum. {1 0.0}))
-(def ONE  (Sum. {1 1.0}))
+(def ZERO (Sum. {:c 0.0}))
+(def ONE  (Sum. {:c 1.0}))
 
 (defn is-constant?
   ([x] (or (number? x)
-           (instance? Sum x)
-           (= #{1} (set (keys (:terms x))))
-           (empty? (keys (:terms x)))))
+           (and (instance? Sum x)
+                (#{#{} #{:c}} (set (keys (:terms x)))))))
   
   ([x y]
    (or (and (number? x) (== y x))
        (and (instance? Sum x)
-            (when-let [xv (-> x :terms (get 1))]
+            (when-let [xv (-> x :terms (get :c))]
               (== y xv))
             (= 1 (count (:terms x)))))))
 
@@ -54,7 +53,7 @@
   (let [factors (remove (comp is-zero? second)
                         (:factors p))]
     (if (empty? factors)
-      1 (Product. (into {} factors)))))
+      :c (Product. (into {} factors)))))
 
 (defn is-logical? [x]
   (or (instance? Constraint x)
@@ -66,18 +65,30 @@
      (number? x) x
 
      (instance? Sum x)
-     (-> x :terms (get 1 0)))
+     (-> x :terms (get :c 0)))
    0))
 
 (defmulti norm-expr expression-type)
 
-(defmethod norm-expr :number   [x] (Sum. {1 (double x)}))
+(defn norm-exprs [exprs]
+  (doall
+   (reduce
+    (fn [a e]
+      (if (and (seq? e) (not (vector? e)))
+        (concat a (norm-exprs e))
+        (conj a (norm-expr e))))
+    [] exprs)))
+
+(defmethod norm-expr :number   [x] (Sum. {:c (double x)}))
 (defmethod norm-expr :boolean  [x] (norm-expr (if x 1 0)))
 (defmethod norm-expr :variable [x]
   (let [v (get *lp-vars* x)]
-    (if (:fixed v)
+    (if (or (:fixed v)
+            (and (:lower v)
+                 (:upper v)
+                 (== (:lower v) (:upper v))))
       ;; Constant
-      (norm-expr (:value v))
+      (norm-expr (:value v (:lower v)))
       ;; v^1
       (Sum. {(Product. {x 1}) 1}))))
 (defmethod norm-expr :product  [x] (Sum. {x 1})) 
@@ -99,8 +110,8 @@
                    :let [wc (* wa wb)]
                    :when (not (zero? wc))]
                [(cond
-                  (is-one? ka) kb
-                  (is-one? kb) ka
+                  (= :c ka) kb
+                  (= :c kb) ka
 
                   (and (instance? Product ka)
                        (instance? Product kb))
@@ -121,7 +132,7 @@
         :else
         (throw (ex-info "Unable to mul" {:val val}))))
     ONE
-    (map norm-expr args))))
+    (norm-exprs args))))
 
 (defmethod norm-expr :+        [[_ & args]]
   (doall
@@ -138,10 +149,10 @@
 
         :else (throw (ex-info "Unable to add" {:val val}))))
     ZERO
-    (map norm-expr args))))
+    (norm-exprs args))))
 
 (defmethod norm-expr :-        [[_ & args]]
-  (let [[f & r] (doall (map norm-expr args))]
+  (let [[f & r] (norm-exprs args)]
     (cond
       (seq r)
       (norm-expr [:+ f [:- `[:+ ~@r]]])
@@ -193,7 +204,7 @@
   (norm-expr `[:<= ~@(reverse args)]))
 
 (defmethod norm-expr :<=       [[_ & args]]
-  (let [args (doall (map norm-expr args))]
+  (let [args (norm-exprs args)]
     (cond
       (= 2 (count args))
       ;; so here we have a <= b
@@ -228,7 +239,7 @@
 
 (defmethod norm-expr :and      [[_ & args]]
   ;; several constraints which are all true
-  (let [args (doall (map norm-expr args))]
+  (let [args (norm-exprs args)]
     (if (every? is-logical? args)
       (Conjunction.
        (reduce
@@ -252,8 +263,9 @@
         ]
     (Constraint. expr (- k) (- k))))
 
-(defmethod norm-expr :default  [[f & args]]
-  (Sum. {(Abnormal. f (doall (map norm-expr args))) 1}))
+;; (defmethod norm-expr :default  [[f & args]]
+;;   (Sum. {(Abnormal. f (doall (map norm-expr args))) 1}))
+
 
 (defn add-bounds [var]
   (cond-> var
@@ -298,7 +310,13 @@
 
             lp (->> lp
                     (s/transform [:vars s/MAP-VALS] add-bounds)
-                    (s/transform [:constraints s/MAP-VALS] norm-expr)
+                    (s/transform [:constraints s/MAP-VALS]
+                                 (fn [c]
+                                   (if (and (seq? c) (not (vector? c)))
+                                     (norm-expr [:and c])
+                                     (norm-expr c)
+                                     )))
+                    
                     (s/transform [:objective] norm-expr))
             ]
         ;; Convert to normalized program record
@@ -308,7 +326,7 @@
 
 (defmethod linear? Number [x] true)
 (defmethod linear? Sum [x] (every? linear? (keys (:terms x))))
-(defmethod linear? Product [x]
+(defmethod linear? Product [x] ;; TODO special case for single variable?
   (let [by-exponent (group-by (comp double second) (:factors x))
         exponents (conj (set (keys by-exponent))
                         1.0 0.0)]
@@ -328,11 +346,11 @@
 
 (defmethod linear? :default [_] false)
 
-(defn merge-results [lp vars]
-  (update
-   lp :vars
-   #(merge-with merge %1 %2) ;; this will add :value if it was missing.
-   vars))
+(defn merge-results [lp result]
+  (-> lp
+      (update :vars
+              #(merge-with merge %1 %2) (:vars result))
+      (assoc :solution (:solution result))))
 
 (defn constraint-bodies
   "Given a normalized LP, get all the constraint bodies, ignoring their names.
@@ -349,31 +367,48 @@
 
              (:body c)))))
 
-(defmethod print-method Sum [x ^java.io.Writer w]
-  (print-method
-   `[:+ ~@(for [[t m] (:terms x) :when (not (is-zero? m))]
-            (if (is-one? m)
-              t
-              [:* m t]
-              )
-            )]
-   w))
+(defn linear-variable [p] (first (keys (:factors p))))
 
-(defmethod print-method Product [x ^java.io.Writer w]
-  (print-method
-   (if (= 1 (count (:factors x)))
-     (let [[x n] (first (:factors x))]
-       (if (is-one? n) x [:** x n]))
-     `[:* ~@(for [[x n] (:factors x)]
-              (if (is-one? n) x [:** x n]))])
-   w))
+(defmulti linear-coefficients class)
+(defmethod linear-coefficients Sum [sum]
+  (reduce
+   (fn [acc [term weight]]
+     (when (linear? term)
+       (let [term (simplify-product term)
+             x    (linear-variable term)
+             ]
+         (assoc acc x (+ weight (get acc x 0))))))
+   {} (:terms sum)))
 
-;; (defn linear-coefficients [expr]
-;;   (when (instance? Sum expr)
-;;     (for [[k m] (:terms expr)
-;;           :when-not (zero? m) ;; 0x = 0
-;;           :when-not (and (number? k) (== 1 k))
-;;           ]
-      
-;;       )
-;;     ))
+(defmethod linear-coefficients Constraint [c]
+  (linear-coefficients (:body c)))
+
+;; (defmethod print-method Sum [x ^java.io.Writer w]
+;;   (print-method
+;;    `[:S ~@(for [[t m] (:terms x) :when (not (is-zero? m))]
+;;             (cond
+;;               (= :c t) m
+;;               (is-one? m) t
+;;               :else [:* m t])
+;;             )]
+;;    w))
+
+
+;; (defmethod print-method Product [x ^java.io.Writer w]
+;;   (print-method
+;;    (if (= 1 (count (:factors x)))
+;;      (let [[x n] (first (:factors x))]
+;;        (if (is-one? n) x [:** x n]))
+;;      `[:P ~@(for [[x n] (:factors x)]
+;;               (if (is-one? n) x [:** x n]))])
+;;    w))
+
+
+;; (binding [*lp-vars* {:x {} :y {}}]
+;;   (norm-exprs
+;;    (list
+;;     [:+ (for [v [:x :y] i (range 2)]
+;;           [:* v (inc i)]
+;;           )])
+;;    ))
+

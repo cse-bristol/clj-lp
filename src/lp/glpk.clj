@@ -78,7 +78,7 @@
       
       )))
 
-(defn solve [lp]
+(defn solve [lp & {:as args}]
   (let [{problem-text :program var-index :index-to-var}
         (lpio/cplex lp)
         
@@ -92,9 +92,10 @@
 
         result (glpsol result-text var-index)]
     (-> (lp/merge-results lp result)
-        (assoc
-         :state blah
-         )
+        ;; (assoc
+        ;;  :state blah
+        ;;  )
+
         )))
 
 
