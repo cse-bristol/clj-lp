@@ -1,8 +1,11 @@
 (ns lp.core
   (:require [clojure.set :refer [map-invert]]
-            [com.rpl.specter :as s]))
+            [com.rpl.specter :as s]
+            [clojure.math.combinatorics :refer [cartesian-product]]
+            ))
 
-(def ^:dynamic *lp-vars* #{})
+(def ^:dynamic *lp-vars* {})
+(def ^:dynamic *raw-vars* {})
 
 (defrecord Product [factors]) ;; {:x 2 :y 3} => x² × y³
 (defrecord Sum [terms]) ;; {a 1 b 2} => a + 2b
@@ -27,22 +30,20 @@
     
     (vector? expr)   (first expr) ;; operator
 
-    :else (throw (ex-info "Unknown expression-type" {:expr expr :c (class expr)
-                                                     :vars *lp-vars*
-                                                     }))))
+    :else (throw (ex-info "Unknown expression-type" {:expr expr ::c (class expr)}))))
 
-(def ZERO (Sum. {:c 0.0}))
-(def ONE  (Sum. {:c 1.0}))
+(def ZERO (Sum. {::c 0.0}))
+(def ONE  (Sum. {::c 1.0}))
 
 (defn is-constant?
   ([x] (or (number? x)
            (and (instance? Sum x)
-                (#{#{} #{:c}} (set (keys (:terms x)))))))
+                (#{#{} #{::c}} (set (keys (:terms x)))))))
   
   ([x y]
    (or (and (number? x) (== y x))
        (and (instance? Sum x)
-            (when-let [xv (-> x :terms (get :c))]
+            (when-let [xv (-> x :terms (get ::c))]
               (== y xv))
             (= 1 (count (:terms x)))))))
 
@@ -50,10 +51,12 @@
 (defn is-zero? [x] (is-constant? x 0))
 
 (defn simplify-product [p]
-  (let [factors (remove (comp is-zero? second)
-                        (:factors p))]
-    (if (empty? factors)
-      :c (Product. (into {} factors)))))
+  (if (= ::c p)
+    p
+    (let [factors (remove (comp is-zero? second) (:factors p))]
+      (if (empty? factors)
+        ::c
+        (Product. (into {} factors))))))
 
 (defn is-logical? [x]
   (or (instance? Constraint x)
@@ -65,7 +68,7 @@
      (number? x) x
 
      (instance? Sum x)
-     (-> x :terms (get :c 0)))
+     (-> x :terms (get ::c 0)))
    0))
 
 (defmulti norm-expr expression-type)
@@ -79,7 +82,7 @@
         (conj a (norm-expr e))))
     [] exprs)))
 
-(defmethod norm-expr :number   [x] (Sum. {:c (double x)}))
+(defmethod norm-expr :number   [x] (Sum. {::c (double x)}))
 (defmethod norm-expr :boolean  [x] (norm-expr (if x 1 0)))
 (defmethod norm-expr :variable [x]
   (let [v (get *lp-vars* x)]
@@ -110,8 +113,8 @@
                    :let [wc (* wa wb)]
                    :when (not (zero? wc))]
                [(cond
-                  (= :c ka) kb
-                  (= :c kb) ka
+                  (= ::c ka) kb
+                  (= ::c kb) ka
 
                   (and (instance? Product ka)
                        (instance? Product kb))
@@ -119,7 +122,9 @@
 
                   :else (throw (ex-info "Can't multiply these" {:a ka :b kb})))
                 wc])
-             (reduce ;; roll up any products that came out twice
+             ;; now we have the cross product, we need to
+             ;; sum up any duplicates
+             (reduce
               (fn [acc [term mul]]
                 (if (zero? mul)
                   acc
@@ -263,9 +268,45 @@
         ]
     (Constraint. expr (- k) (- k))))
 
-;; (defmethod norm-expr :default  [[f & args]]
-;;   (Sum. {(Abnormal. f (doall (map norm-expr args))) 1}))
+(defmethod norm-expr :default  [e]
+  (throw
+   (if-let [possible-var (get *raw-vars* (first e))]
+     (ex-info "Index outside range for variable" {:variable (first e) :index (rest e)})
+     (ex-info "Unsupported operator in expression, or undefined variable" {:expression e}))))
 
+(let [as-fn (fn [x]
+              (cond
+                (map? x) #(get x (vec %))
+                (fn? x)  #(apply x %) ;; convenience or terrible idea?
+                :else    (constantly x)))]
+  (defn expand-indices
+    "In the normalized form of the program, we want to turn
+  :vars {:x {:indexed-by [#{:a :b}] :value some-fn}}
+  into
+  :vars {[:x :a] {:value (some-fn :a)}
+         [:x :b] {:value (some-fn :b)}}
+  "
+    [vars]
+    (reduce-kv
+     (fn [vars k v]
+       (if-let [indices (:indexed-by v)]
+         (let [v (dissoc v :indexed-by)
+               value (as-fn (:value v))
+               lower (as-fn (:lower v))
+               upper (as-fn (:upper v))
+               fixed (as-fn (:fixed v))
+               ]
+           (->> (for [index (apply cartesian-product indices)]
+                  [`[~k ~@index]
+                   (-> v
+                       (assoc :value (value index)
+                              :lower (lower index)
+                              :upper (upper index)
+                              :fixed (fixed index)))])
+                (into {})
+                (merge vars)))
+         (assoc vars k v)))
+     {} vars)))
 
 (defn add-bounds [var]
   (cond-> var
@@ -287,37 +328,43 @@
   
   (if (instance? Program lp)
     lp
-    (binding [*lp-vars* (:vars lp)]
+    
+    (binding [*raw-vars* (:vars lp)]
       (let [tidy-constraints
             #(if (map? %) %
                  (into {} (map-indexed vector %)))
-
+            
             {obj :objective min :minimize max :maximize
              subject-to :subject-to
              constraints :constraints}
             lp
-            lp (cond-> lp (not obj)
-                       (cond-> 
-                           min (-> (assoc :sense :minimize :objective min)
-                                   (dissoc :minimize))
-                           max (-> (assoc :sense :maximize :objective max)
-                                   (dissoc :maximize))
-                           constraints (update :constraints tidy-constraints)
-                           subject-to  (-> (update :constraints merge
-                                                   (tidy-constraints subject-to))
-                                           (dissoc :subject-to))
-                           ))
+            lp (cond->
+                   lp (not obj)
+                   (cond-> 
+                       min (-> (assoc :sense :minimize :objective min)
+                               (dissoc :minimize))
+                       max (-> (assoc :sense :maximize :objective max)
+                               (dissoc :maximize))
+                       constraints (update :constraints tidy-constraints)
+                       subject-to  (-> (update :constraints merge
+                                               (tidy-constraints subject-to))
+                                       (dissoc :subject-to))
+                       ))
 
-            lp (->> lp
-                    (s/transform [:vars s/MAP-VALS] add-bounds)
-                    (s/transform [:constraints s/MAP-VALS]
-                                 (fn [c]
-                                   (if (and (seq? c) (not (vector? c)))
-                                     (norm-expr [:and c])
-                                     (norm-expr c)
-                                     )))
-                    
-                    (s/transform [:objective] norm-expr))
+            lp (-> lp
+                   (->> (s/transform [:vars s/MAP-VALS] add-bounds))
+                   (update :vars expand-indices)) ;; simplifies vars which are an xprod
+            
+            lp (binding [*lp-vars* (:vars lp)]
+                 (->> lp
+                      (s/transform [:constraints s/MAP-VALS]
+                                   (fn [c]
+                                     (if (and (seq? c) (not (vector? c)))
+                                       (norm-expr [:and c])
+                                       (norm-expr c)
+                                       )))
+                      
+                      (s/transform [:objective] norm-expr)))
             ]
         ;; Convert to normalized program record
         (map->Program lp)))))
@@ -325,6 +372,8 @@
 (defmulti linear? class)
 
 (defmethod linear? Number [x] true)
+(defmethod linear? clojure.lang.Keyword [c] (= c ::c))
+
 (defmethod linear? Sum [x] (every? linear? (keys (:terms x))))
 (defmethod linear? Product [x] ;; TODO special case for single variable?
   (let [by-exponent (group-by (comp double second) (:factors x))
@@ -346,11 +395,41 @@
 
 (defmethod linear? :default [_] false)
 
-(defn merge-results [lp result]
-  (-> lp
-      (update :vars
-              #(merge-with merge %1 %2) (:vars result))
-      (assoc :solution (:solution result))))
+(defn merge-results
+  "Add results back onto an lp.
+  If the original lp is not normalized it might have vars that are :indexed-by
+  The :value for these should be of the form {[index] value ...}
+  "
+  [lp result]
+
+  (let [indexed-vars (set
+                      (filter
+                       (comp seq :indexed-by (:vars lp))
+                       (keys (:vars lp))))
+
+        result-vars
+        (reduce-kv
+         (fn [vars k v]
+           (if
+             (and (vector? k) (indexed-vars (first k)))
+             (let [var (first k)
+                   index (vec (rest k))]
+               (cond->
+                   vars
+                 (:value v)
+                 (update-in [var :value] assoc index (:value v))
+                 (:dual-value v)
+                 (update-in [var :dual-value] assoc index (:dual-value v))
+                 (:status v)
+                 (update-in [var :status] assoc index (:status v))))
+
+             (assoc vars k v)))
+         {} (:vars result))
+        
+        ]
+    (-> lp
+        (update :vars #(merge-with merge %1 %2) result-vars)
+        (assoc :solution (:solution result)))))
 
 (defn constraint-bodies
   "Given a normalized LP, get all the constraint bodies, ignoring their names.
@@ -367,7 +446,9 @@
 
              (:body c)))))
 
-(defn linear-variable [p] (first (keys (:factors p))))
+(defn linear-variable [p]
+  (if (= p ::c) p
+      (first (keys (:factors p)))))
 
 (defmulti linear-coefficients class)
 (defmethod linear-coefficients Sum [sum]
@@ -382,33 +463,3 @@
 
 (defmethod linear-coefficients Constraint [c]
   (linear-coefficients (:body c)))
-
-;; (defmethod print-method Sum [x ^java.io.Writer w]
-;;   (print-method
-;;    `[:S ~@(for [[t m] (:terms x) :when (not (is-zero? m))]
-;;             (cond
-;;               (= :c t) m
-;;               (is-one? m) t
-;;               :else [:* m t])
-;;             )]
-;;    w))
-
-
-;; (defmethod print-method Product [x ^java.io.Writer w]
-;;   (print-method
-;;    (if (= 1 (count (:factors x)))
-;;      (let [[x n] (first (:factors x))]
-;;        (if (is-one? n) x [:** x n]))
-;;      `[:P ~@(for [[x n] (:factors x)]
-;;               (if (is-one? n) x [:** x n]))])
-;;    w))
-
-
-;; (binding [*lp-vars* {:x {} :y {}}]
-;;   (norm-exprs
-;;    (list
-;;     [:+ (for [v [:x :y] i (range 2)]
-;;           [:* v (inc i)]
-;;           )])
-;;    ))
-
