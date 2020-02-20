@@ -20,7 +20,7 @@
           (spit (io/file temp-dir "scip.set")
                 (s/join
                  "\n"
-                 (for [[k v] settings]
+                 (for [[k v] (dissoc settings :scipampl)]
                    (format "%s = %s" (scip-setting-keys k k) v))))
           (sh/sh
            ;; need right args here

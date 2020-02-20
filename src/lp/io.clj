@@ -178,18 +178,22 @@
         n-linear-constraints n-constraints
 
         count-variables
-        (fn count-variables [x]
-          (cond
-            (number? x) 0
+        (fn [x] (count (dissoc (lp/linear-coefficients x) ::lp/c)))
+        
+        ;; count-variables
+        ;; (fn count-variables [x]
+        ;;   (cond
+        ;;     (instance? lp.core.Product x)
+        ;;     (count (remove lp/is-zero? (vals (:factors x))))
 
-            (instance? lp.core.Sum x)
-            (reduce + 0 (map count-variables (keys (:terms x))))
+        ;;     (instance? lp.core.Sum x)
+        ;;     (reduce + 0 (map count-variables (keys (:terms x))))
 
-            (instance? lp.core.Product x)
-            (count (remove lp/is-zero? (vals (:factors x))))
-            
-            ;; our precondition should save us from trouble here
-            :else 0))
+        ;;     (number? x) 0
+
+        ;;     ;; our precondition should save us from trouble here
+        ;;     :else 0))
+
 
         nz-jacobians  (reduce + 0 (for [c constraints] (count-variables (:body c))))
         gradients     (count-variables (:objective lp))

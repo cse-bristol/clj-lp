@@ -2,7 +2,8 @@
   (:require [clojure.set :refer [map-invert]]
             [com.rpl.specter :as s]
             [clojure.math.combinatorics :refer [cartesian-product]]
-            ))
+            [clojure.spec.alpha :as spec]
+            [lp.dsl]))
 
 (def ^:dynamic *lp-vars* {})
 (def ^:dynamic *raw-vars* {})
@@ -328,46 +329,50 @@
   
   (if (instance? Program lp)
     lp
-    
-    (binding [*raw-vars* (:vars lp)]
-      (let [tidy-constraints
-            #(if (map? %) %
-                 (into {} (map-indexed vector %)))
-            
-            {obj :objective min :minimize max :maximize
-             subject-to :subject-to
-             constraints :constraints}
-            lp
-            lp (cond->
-                   lp (not obj)
-                   (cond-> 
-                       min (-> (assoc :sense :minimize :objective min)
-                               (dissoc :minimize))
-                       max (-> (assoc :sense :maximize :objective max)
-                               (dissoc :maximize))
-                       constraints (update :constraints tidy-constraints)
-                       subject-to  (-> (update :constraints merge
-                                               (tidy-constraints subject-to))
-                                       (dissoc :subject-to))
-                       ))
+    (if (spec/valid? :lp/program lp)
+      (binding [*raw-vars* (:vars lp)]
+        (let [tidy-constraints
+              #(if (map? %) %
+                   (into {} (map-indexed vector %)))
+              
+              {obj :objective min :minimize max :maximize
+               subject-to :subject-to
+               constraints :constraints}
+              lp
+              lp (cond->
+                     lp (not obj)
+                     (cond-> 
+                         min (-> (assoc :sense :minimize :objective min)
+                                 (dissoc :minimize))
+                         max (-> (assoc :sense :maximize :objective max)
+                                 (dissoc :maximize))
+                         constraints (update :constraints tidy-constraints)
+                         subject-to  (-> (update :constraints merge
+                                                 (tidy-constraints subject-to))
+                                         (dissoc :subject-to))
+                         ))
 
-            lp (-> lp
-                   (->> (s/transform [:vars s/MAP-VALS] add-bounds))
-                   (update :vars expand-indices)) ;; simplifies vars which are an xprod
-            
-            lp (binding [*lp-vars* (:vars lp)]
-                 (->> lp
-                      (s/transform [:constraints s/MAP-VALS]
-                                   (fn [c]
-                                     (if (and (seq? c) (not (vector? c)))
-                                       (norm-expr [:and c])
-                                       (norm-expr c)
-                                       )))
-                      
-                      (s/transform [:objective] norm-expr)))
-            ]
-        ;; Convert to normalized program record
-        (map->Program lp)))))
+              lp (-> lp
+                     (->> (s/transform [:vars s/MAP-VALS] add-bounds))
+                     (update :vars expand-indices)) ;; simplifies vars which are an xprod
+              
+              lp (binding [*lp-vars* (:vars lp)]
+                   (->> lp
+                        (s/transform [:constraints s/MAP-VALS]
+                                     (fn [c]
+                                       (if (and (seq? c) (not (vector? c)))
+                                         (norm-expr [:and c])
+                                         (norm-expr c)
+                                         )))
+                        
+                        (s/transform [:objective] norm-expr)))
+              ]
+          ;; Convert to normalized program record
+          (map->Program lp)))
+      (throw (ex-info
+              "Invalid linear program"
+              {:explain-data (spec/explain-data :lp/program lp)
+               :explain-message (spec/explain-str :lp/program lp)})))))
 
 (defmulti linear? class)
 
