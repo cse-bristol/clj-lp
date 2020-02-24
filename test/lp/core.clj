@@ -64,7 +64,34 @@
 
     (t/is (== 9 (::sut/c g)))
     (t/is (== 2 (:y g)))
-    (t/is (== 3 (:x g)))))
+    (t/is (== 3 (:x g)))
+    ))
+
+(t/deftest constraint-bodies-no-constant
+  ;; in the normalized form, all constraints should have the constant
+  ;; part moved outside the main expression and into the bound.
+  (let [p {:minimize [:+ [:* 3 :x] [:* 2 :y] 9]
+           :subject-to (list [:<= :x [:+ :y 33]])
+           :vars {:x {} :y {}}}
+        p (sut/normalize p)
+        c (first (sut/constraint-bodies p))
+        ]
+    (t/is (instance? lp.core.Constraint c))
+    (t/is (zero? (sut/constant-value (:body c))))
+    ;; this should either be
+    ;; x - y <= 33
+    ;; or y - x >= -33
+
+    (t/is (or (and (== 33 (:upper c))
+                   (== 1 (:x (sut/linear-coefficients c)))
+                   (== -1 (:y (sut/linear-coefficients c)))
+                   )
+
+              (and (== -33 (:lower c))
+                   (== -1 (:x (sut/linear-coefficients c)))
+                   (== 1 (:y (sut/linear-coefficients c)))
+                   )))))
+
 
 (t/deftest variable-shorthands
   (t/is (= (sut/expand-indices
