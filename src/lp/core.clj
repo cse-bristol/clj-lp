@@ -37,9 +37,10 @@
 (def ONE  (Sum. {::c 1.0}))
 
 (defn is-constant?
-  ([x] (or (number? x)
-           (and (instance? Sum x)
-                (#{#{} #{::c}} (set (keys (:terms x)))))))
+  ([x]
+   (or (number? x)
+       (and (instance? Sum x)
+            (#{#{} #{::c}} (set (keys (:terms x)))))))
   
   ([x y]
    (or (and (number? x) (== y x))
@@ -277,6 +278,7 @@
 
 (let [as-fn (fn [x]
               (cond
+                (nil? x) nil
                 (map? x) #(get x (vec %))
                 (fn? x)  #(apply x %) ;; convenience or terrible idea?
                 :else    (constantly x)))]
@@ -291,19 +293,19 @@
     (reduce-kv
      (fn [vars k v]
        (if-let [indices (:indexed-by v)]
-         (let [v (dissoc v :indexed-by)
-               value (as-fn (:value v))
+         (let [value (as-fn (:value v))
                lower (as-fn (:lower v))
                upper (as-fn (:upper v))
                fixed (as-fn (:fixed v))
+               v (dissoc v :indexed-by :value :lower :upper :fixed)
                ]
            (->> (for [index (apply cartesian-product indices)]
                   [`[~k ~@index]
-                   (-> v
-                       (assoc :value (value index)
-                              :lower (lower index)
-                              :upper (upper index)
-                              :fixed (fixed index)))])
+                   (cond-> v
+                     value (assoc :value (value index))
+                     lower (assoc :lower (lower index))
+                     upper (assoc :upper (upper index))
+                     fixed (assoc :fixed (fixed index)))])
                 (into {})
                 (merge vars)))
          (assoc vars k v)))
@@ -400,6 +402,26 @@
 
 (defmethod linear? :default [_] false)
 
+(defn collapse-indices [input-vars output-vars]
+  (let [indexed-vars (set (for [[k v] input-vars :when (seq (:indexed-by v))] k))]
+    (reduce-kv
+     (fn [vars k v]
+       (if
+           (and (vector? k) (indexed-vars (first k)))
+         (let [var (first k)
+               index (vec (rest k))]
+           (cond->
+               vars
+             (:value v)
+             (update-in [var :value] assoc index (:value v))
+             (:dual-value v)
+             (update-in [var :dual-value] assoc index (:dual-value v))
+             (:status v)
+             (update-in [var :status] assoc index (:status v))))
+
+         (assoc vars k v)))
+     {} output-vars)))
+
 (defn merge-results
   "Add results back onto an lp.
   If the original lp is not normalized it might have vars that are :indexed-by
@@ -407,31 +429,7 @@
   "
   [lp result]
 
-  (let [indexed-vars (set
-                      (filter
-                       (comp seq :indexed-by (:vars lp))
-                       (keys (:vars lp))))
-
-        result-vars
-        (reduce-kv
-         (fn [vars k v]
-           (if
-             (and (vector? k) (indexed-vars (first k)))
-             (let [var (first k)
-                   index (vec (rest k))]
-               (cond->
-                   vars
-                 (:value v)
-                 (update-in [var :value] assoc index (:value v))
-                 (:dual-value v)
-                 (update-in [var :dual-value] assoc index (:dual-value v))
-                 (:status v)
-                 (update-in [var :status] assoc index (:status v))))
-
-             (assoc vars k v)))
-         {} (:vars result))
-        
-        ]
+  (let [result-vars (collapse-indices (:vars lp) (:vars result))]
     (-> lp
         (update :vars #(merge-with merge %1 %2) result-vars)
         (assoc :solution (:solution result)))))
