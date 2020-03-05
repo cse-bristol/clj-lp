@@ -1,4 +1,4 @@
-q#+TITLE: Linear programming in clojure
+#+TITLE: Linear programming in clojure
 
 A library to help integrate lp solvers with clojure.
 
