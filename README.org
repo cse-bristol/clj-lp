@@ -1,4 +1,4 @@
-#+TITLE: Linear programming in clojure
+q#+TITLE: Linear programming in clojure
 
 A library to help integrate lp solvers with clojure.
 
@@ -12,6 +12,8 @@ Linear programs are expressed as a plain map like so:
    :vars {:name <var stuff>}
 }
 #+END_EXAMPLE
+
+The classic diet LP is written out in [[./examples/diet.clj]].
 
 ** Variables
 Variables are defined in the map under ~:vars~.
