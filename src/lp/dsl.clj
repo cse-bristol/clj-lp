@@ -45,7 +45,7 @@
 (s/def :lp/subject-to :lp/constraints)
 (s/def :lp/sense #{:minimize :maximize})
 
-(s/def :lp/expr)
+(s/def :lp/expr any?)
 (s/def :lp/objective :lp/expr)
 (s/def :lp/constraint :lp/expr)
 
