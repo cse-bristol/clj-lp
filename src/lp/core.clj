@@ -15,6 +15,9 @@
 (defrecord Conjunction [body]) ;; AND x y z
 (defrecord Abnormal [fn args]) ;; something which could not be normalized
 
+(def ^:private ^:constant common-operators
+  {+ :+ * :* - :- / :/ < :< > :> = := <= :<= >= :>=})
+
 (defn expression-type [expr]
   (cond
     (number? expr)    :number
@@ -28,8 +31,11 @@
     (or (instance? Sum expr)
         (instance? Constraint expr)
         (instance? Conjunction expr)) :identity
-    
-    (vector? expr)   (first expr) ;; operator
+
+    (vector? expr)
+    ;; a grim hack to make using operators more convenient
+    ;; 
+    (get common-operators (first expr) (first expr))
 
     :else (throw (ex-info "Unknown expression-type" {:expr expr ::c (class expr)}))))
 
