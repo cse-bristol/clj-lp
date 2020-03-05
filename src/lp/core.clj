@@ -281,23 +281,45 @@
      (ex-info "Index outside range for variable" {:variable (first e) :index (rest e)})
      (ex-info "Unsupported operator in expression, or undefined variable" {:expression e}))))
 
-(let [as-fn (fn [x]
-              (cond
-                (map? x) #(get x (vec %))
-                (fn? x)  #(apply x %) ;; convenience or terrible idea?
-                :else    (constantly x)))]
+(let [as-fn-n (fn [x]
+                (cond
+                  (map? x) #(get x (vec %))
+                  (fn? x)  #(apply x %) ;; convenience or terrible idea?
+                  :else    (constantly x)))
+      as-fn-1  (fn [x]
+                 (cond
+                   (map? x) #(get x %)
+                   (fn? x)  #(apply x %)
+                   :else    (constantly x)))
+      ]
   (defn expand-indices
     "In the normalized form of the program, we want to turn
   :vars {:x {:indexed-by [#{:a :b}] :value some-fn}}
   into
   :vars {[:x :a] {:value (some-fn :a)}
          [:x :b] {:value (some-fn :b)}}
+
+  The :value, :lower, :upper, and :fixed parts can support three
+  different forms:
+
+  1. If it's a map, it is taken to be a map from an index to a value
+     There's a special case where the index always has one element,
+     so you can write:
+     {:x {:indexed-by [#{:a :b}] :value {:a 1 :b 2}}}
+     and
+     {:x {:indexed-by [#{:a :b} #{:c :d}] :value {[:a :c] 1 [:b :c] 2, ...}}}
+     point being in the first case we have written :a rather than [:a].
+  2. If it's fn?, it's called with the index as its arguments
+  3. Otherwise it's taken as a constant and repeated everywhere
   "
     [vars]
     (reduce-kv
      (fn [vars k v]
        (if-let [indices (:indexed-by v)]
-         (let [v (dissoc v :indexed-by)
+         (let [singular-index (= 1 (count indices))
+               as-fn (if singular-index as-fn-1 as-fn-n)
+               
+               v (dissoc v :indexed-by)
                value (as-fn (:value v))
                lower (as-fn (:lower v))
                upper (as-fn (:upper v))
