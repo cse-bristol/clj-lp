@@ -115,6 +115,8 @@
                  :value (fn [x y] [x y])}})
            {[:x 1 :a] {:value [1 :a]}}))
 
+  (t/is (= (sut/expand-indices {:x {:indexed-by [#{1 2}] :value {1 3, 2 9}}})
+           {[:x 1] {:value 3}, [:x 2] {:value 9}}))
 
   (let [orig-vars {:x {:indexed-by [#{1 2} #{:a :b}]}}
         new-vars  {[:x 1 :a] {:value 1}
@@ -127,5 +129,13 @@
               [1 :b] 3
               [2 :b] 4}
              (-> (sut/collapse-indices orig-vars new-vars)
-                 :x :value)))))
+                 :x :value))))
+
+  ;; this seems like it could be checked with test.check somehow.
+  (let [orig-vars {:x {:indexed-by [#{1 2}]}}
+        results   {[:x 1] {:value 1}
+                   [:x 2] {:value 9}}
+        ]
+    (t/is (= {1 1, 2 9} (-> (sut/collapse-indices orig-vars results) :x :value)))))
+
 

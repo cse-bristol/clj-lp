@@ -18,6 +18,8 @@
 (def ^:private ^:constant common-operators
   {+ :+ * :* - :- / :/ < :< > :> = := <= :<= >= :>=})
 
+(defn- singleton? [coll] (and (seq coll) (empty? (rest coll))))
+
 (defn expression-type [expr]
   (cond
     (number? expr)    :number
@@ -291,7 +293,7 @@
       as-fn-1  (fn [x]
                  (cond
                    (nil? x) nil
-                   (map? x) #(get x %)
+                   (map? x) #(get x (first %))
                    (fn? x)  #(apply x %)
                    :else    (constantly x)))
       ]
@@ -319,8 +321,7 @@
     (reduce-kv
      (fn [vars k v]
        (if-let [indices (:indexed-by v)]
-
-         (let [singular-index (= 1 (count indices))
+         (let [singular-index (singleton? indices)
                as-fn (if singular-index as-fn-1 as-fn-n)
                value (as-fn (:value v))
                lower (as-fn (:lower v))
@@ -435,10 +436,13 @@
   (let [indexed-vars (set (for [[k v] input-vars :when (seq (:indexed-by v))] k))]
     (reduce-kv
      (fn [vars k v]
-       (if
-           (and (vector? k) (indexed-vars (first k)))
+       (if (and (vector? k) (indexed-vars (first k)))
          (let [var (first k)
-               index (vec (rest k))]
+               index (rest k)
+               index (if (singleton? index)
+                       (first index)
+                       (vec index))
+               ]
            (cond->
                vars
              (:value v)
