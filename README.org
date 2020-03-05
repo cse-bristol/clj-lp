@@ -2,21 +2,126 @@
 
 A library to help integrate lp solvers with clojure.
 
-#+BEGIN_EXAMPLE clj
-  (require '[lp.glpk :as glpk])
+* Formulation
+Linear programs are expressed as a plain map like so:
 
-  (glpk/solve
-    {:maximize [:+ [:* 2 :x] [:+ :y :z]]
-     :subject-to [[:<= [:+ :x :z] 3]
-                  [:<= :y :x]]
-     :vars {:x {} :y {} :z {}}})
+#+BEGIN_EXAMPLE
+{
+   :minimize <expr> | :maximize <expr> | :objective <expr> :sense <:minimize | :maximize>
+   <:constraints|:subject-to> <{:name <expr>} | (list <expr>)>
+   :vars {:name <var stuff>}
+}
 #+END_EXAMPLE
 
-Or whatever.
+** Variables
+Variables are defined in the map under ~:vars~.
+The keys of this map are variable names; you can refer to these in the body of an expression.
 
-* TODO Two-sided bounds
-* TODO Logical conjunctions in constraints
-* TODO Remove dead constraints
-* TODO Read more status information from SCIP
-* TODO Add convenient evaluation function
-* TODO Add piecewise linearizer
+For example if you write
+
+#+BEGIN_EXAMPLE
+:vars {:x {}, :y {}, [:z 1] {}, [:z 2] {}}
+#+END_EXAMPLE
+
+This will define four variables in the program ~:x~, ~:y~, ~[:z 1]~ and ~[:z 2]~.
+
+The empty maps in this example are where you can say things about the variable:
+
+- ~:type~ can be ~:integer~, ~:binary~, ~:non-negative~, ~:real~. Default is ~:real~ (unbounded real value)
+- ~:upper~ and ~:lower~ give upper and lower bounds for the variable. Set by ~:type~ where obvious
+- ~:value~ gives a value for the variable; this is used to store results.
+- ~:fixed~ if true, pins the variable value in which case it is replaced with ~:value~ and not included in the compiled program.
+  If ~:upper~ and ~:lower~ are equal this also makes the variable fixed.
+
+It is common to want to define many variables that are indexed in some way, for example x₁, x₂, x₃,... to say there are some related x.
+One way to do this is by using vectors of variable + indices for the variable name, like ~[:z 1]~ and ~[:z 2]~ above.
+
+Since this is a common there is a convenience for this, which is to use ~:indexed-by~ in the variable. 
+For example,
+
+#+BEGIN_EXAMPLE
+(def x-indices (range 3))
+(def y-indices #{:fruit :mushroom :rock})
+
+...
+
+:vars {:chosen {:type :binary :indexed-by [x-indices y-indices]}}
+#+END_EXAMPLE
+
+This is equivalent to having vars ~[:chosen 0 :fruit]~, ~[:chosen 0 :mushroom]~, ~[:chosen 0 :rock]~, ~[:chosen 1 :fruit]~, ~[:chosen 1 :mushroom]~, ~[:chosen 1 :rock]~, and so on.
+
+You can just as well write this out with something like:
+
+#+BEGIN_EXAMPLE
+:vars
+(->> (for [x x-indices y y-indices] [[:chosen x y] {:type :binary}])
+   (into {}))
+#+END_EXAMPLE
+
+Or, with multiple variables, a concatenation of these.
+
+If using ~:indexed-by~, the ~:value~, ~:upper~, ~:lower~ and ~:fixed~ attributes can be any of
+- A constant value (same for all indices)
+- A function, which will be evaluated with the indices, so for above you could say ~:upper (fn [x y] ...)~ to decide upper-bound based on ~0 :fruit~, ~0 :mushroom~, etc
+- A map, which although a function cannot have more than one argument, in which case it should look like ~{[0 :fruit] val1, [0 :mushroom] val2}~...
+  - There's a special case for this, which is: if your variable is indexed by only a /single/ set of indices, the map can omit the vector around the key, so 
+
+    #+BEGIN_EXAMPLE
+    {:vars {:x {:indexed-by [ys] :fixed {0 true 3 true} :value {0 9, 3 22}}}}
+    #+END_EXAMPLE
+    
+    Works to mean that ~[:x 0]~ is fixed to have value 9, and ~[:x 3]~ to have value 22.
+** Expressions
+Expressions are written as you would write a clojure expression, except in a vector rather than in a list.
+
+For example, you could express $x+3*y-z+9$ as
+
+#+BEGIN_EXAMPLE
+[+ :x [* 3 :y] [- :z] 9]
+#+END_EXAMPLE
+
+Here ~:x~, ~:y~ and ~:z~ would be the keys in the ~:vars~ map.
+
+As a convenience, lists/sequences are flattened into the vector containing them.
+This is like how hiccup works, if you are familiar with that.
+
+For example to sum-product over a variable indexed by ~i-vals~ and ~j-vals~ you might write
+
+#+BEGIN_EXAMPLE
+[+ (for [i i-vals j j-vals] [:var i j])]
+#+END_EXAMPLE
+
+This is equilvalent to writing
+#+BEGIN_EXAMPLE
+`[+ ~@(for [i i-vals j j-vals] [:var i j])]
+#+END_EXAMPLE
+
+to directly interpolate the expressions in.
+** Constraints
+Constraints are expressions in which the first element is ~:and~, ~<=~, ~>=~ or ~=~.
+
+When writing your program you can write it the constraints out in a list, or you can name them in a map.
+The names don't do anything really.
+* Solving and results
+Once you have formulated an LP as a map, you can attempt to solve it using glpk or scip using the functions ~lp.glpk/solve~ or ~lp.scip/solve~, which see.
+
+These will return the input LP, but amended so that
+1. There's a ~:solution~ key containing solver output info of some sort
+2. The ~:vars~ contain ~:value~ keys with their solution values. For glpk, other information is also returned on ~:vars~.
+   If your vars use ~:indexed-by~, the output variables are collected back up and put into a map, so the value for ~[:x 1]~ is at
+   ~(-> lp :vars :x :value (get 1))~
+* Tricks
+Useful tricks in LP construction, which could be rolled in:
+** Computing logic functions
+- AND :: If we want to say y = x₁ ∧ x₂, this is
+         - y ∈ ℝ[0..1]
+         - y ≥ x₁ + x₂ - 1
+         - y ≤ x₁
+         - y ≤ x₂
+- OR :: If we want to say y = x₁ ∨ x₂
+        - y ∈ {0,1}
+- XOR ::
+- NOT ::
+** Disjunctive constraints
+** Piecewise linear functions
+* Things to do
