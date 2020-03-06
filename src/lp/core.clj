@@ -93,7 +93,7 @@
     [] exprs)))
 
 (defmethod norm-expr :number   [x] (Sum. {::c (double x)}))
-(defmethod norm-expr :boolean  [x] (norm-expr (if x 1 0)))
+(defmethod norm-expr :boolean  [x] (norm-expr (if x 1.0 0.0)))
 (defmethod norm-expr :variable [x]
   (let [v (get *lp-vars* x)]
     (if (or (:fixed v)
@@ -269,6 +269,12 @@
         nil
         args))
       (throw (ex-info ":and only applicable to constraints or other ands" {:args args})))))
+
+(defmethod norm-expr ::lower [[_ v]]
+  (norm-expr (:lower (get *lp-vars v) (- Double/MAX_VALUE))))
+
+(defmethod norm-expr ::upper [[_ v]]
+  (norm-expr (:upper (get *lp-vars v) Double/MAX_VALUE)))
 
 (defmethod norm-expr :=        [[_ & args]]
   ;; for our two expressions to be equal, they must sum to zero

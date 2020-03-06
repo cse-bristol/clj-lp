@@ -99,6 +99,30 @@ This is equilvalent to writing
 #+END_EXAMPLE
 
 to directly interpolate the expressions in.
+*** Known terms in expressions:
+- ~+~ or ~:+~ :: sums the rest of the expression
+- ~*~ or ~:*~ :: products the rest of the expression
+- ~-~ or ~:-~ :: negates a single argument, or subtracts all arguments but the first from the first
+- ~/~ or ~:/~ :: divides two arguments; currently very limited in scope
+- Any variable :: A variable in the problem
+- Any number :: A constant value
+- Any boolean or nil :: 1 if true, 0 otherwise
+- ~:lp.core/upper~ :: The upper bound of a variable, or Double/MAX_VALUE if no upper bound
+     This is useful for writing big-M constraints, f.e
+     
+     #+BEGIN_EXAMPLE
+     [<= :x [* :indicator [:lp.core/upper :x]]]
+     #+END_EXAMPLE
+
+     Naturally you will want to refine the upper bound for ~:x~ to get the integrality gap down.
+- ~:lp.core/lower~ :: The lower bound of a variable, or - Double/MAX_VALUE if no lower bound
+- In constraints :: 
+  - ~:and~ :: To write several constraints together
+  - ~<=~ or ~:<=~ :: Arguments must be in ascending order
+  - ~>=~ or ~:>=~ :: Arguments must be in descending order
+  - ~=~ or ~:=~ :: Arguments must be equal
+
+
 ** Constraints
 Constraints are expressions in which the first element is ~:and~, ~<=~, ~>=~ or ~=~.
 
@@ -126,4 +150,22 @@ Useful tricks in LP construction, which could be rolled in:
 - NOT ::
 ** Disjunctive constraints
 ** Piecewise linear functions
+If we have a piecewise linear function with n segments
+
+- Define n-1 binary variables zᵢ which indicate whether we are in segment 1, 2, .. n
+- Define n-1 'output' variables sᵢ, which will implement each chunk
+- z₁+z₂... = 1 ; we have to go in one segment
+- 0 ≤ sᵢ ≤ zᵢ ; we can only get output from chunk i if we activate it
+- compute x; x = x₁z₁ + (x2-x₁)s₁ + ...
+- compute y; y = y₁z₁ + (y₁-y₁)s₁ + ...
+** Commitment costs
+This is a simplification of a piecewise linear function, where we have a shape that is
+
+- y = mx + c, or zero if x = 0
+
+This can be done with a single indicator
+
+- z ∈ {0,1}
+- y = z.c + m.x
+- x ≤ z . M for sufficient M
 * Things to do
