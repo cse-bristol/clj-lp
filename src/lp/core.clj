@@ -488,6 +488,14 @@
 
              (:body c)))))
 
+(defn nontrivial-constraint-bodies
+  "Like `constraint-bodies`, with trivial constraints removed"
+  [lp]
+  (remove
+   (fn [{lb :lower ub :upper b :body}]
+     (or (not (or lb ub)) (is-constant? b)))
+   (constraint-bodies lp)))
+
 (defn linear-variable [p]
   (if (= p ::c) p
       (first (keys (:factors p)))))

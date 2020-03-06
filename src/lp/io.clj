@@ -75,7 +75,7 @@
        (print-sum (:objective lp) :constant-value true)
 
        ;; constraints
-       (when-let [cons (seq (lp/constraint-bodies lp))]
+       (when-let [cons (seq (lp/nontrivial-constraint-bodies lp))]
          (println)
          (println)
          (println "subject to")
@@ -168,7 +168,7 @@
         {n-binary-vars :binary n-integer-vars :integer}
         (frequencies (map (comp :type second) var-order))
 
-        constraints (lp/constraint-bodies lp)
+        constraints (lp/nontrivial-constraint-bodies lp)
         
         n-constraints       (count constraints)
         n-objectives        1
