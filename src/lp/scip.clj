@@ -6,7 +6,8 @@
             [clojure.string :as s]))
 
 (def scip-setting-keys
-  {:time-limit "limits/time"})
+  {:time-limit "limits/time"
+   :mip-gap "limits/gap"})
 
 (defn solve [lp & {:keys [scipampl]
                    :or {scipampl "scipampl"}
