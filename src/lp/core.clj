@@ -477,7 +477,6 @@
   "Given a normalized LP, get all the constraint bodies, ignoring their names.
   Why do we have names?"
   [lp]
-
   (apply concat
          (for [[n c] (:constraints lp)]
            (cond
@@ -513,3 +512,32 @@
 
 (defmethod linear-coefficients Constraint [c]
   (linear-coefficients (:body c)))
+
+(defn trivial-checks
+  "Given a normalized LP, do some trivial checks to make sure it's OK"
+  [lp]
+
+  (let [invalid-vars
+        (keep
+         (fn [[v {lb :lower ub :upper}]]
+           (cond
+             (not (and lb ub)) [v "Missing lower or upper bound" lb ub]
+             (not (<= lb ub))  [v "Impossible bounds" lb ub]))
+         (:vars lp))
+
+        invalid-cons
+        (keep
+         (fn [{b :body l :lower u :upper} (constraint-bodies lp)
+
+              cv (and (is-constant? b) (constant-value b))
+              ]
+           (when (or (and l u (> l u))
+                     (and cv
+                          (and l (> l cv))
+                          (and u (< u cv))))
+             ["A constraint has impossible bounds" l b u])))
+
+        problems (concat invalid-vars invalid-cons)
+        ]
+    problems))
+
