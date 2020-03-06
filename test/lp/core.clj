@@ -139,3 +139,14 @@
     (t/is (= {1 1, 2 9} (-> (sut/collapse-indices orig-vars results) :x :value)))))
 
 
+(t/deftest upper-bound-access
+  (let [e (sut/normalize
+           {:minimize [:+
+                       [:lp.core/lower :x]
+                       :x
+                       [:lp.core/upper :x]]
+            :vars {:x {:upper 5 :lower 1}}})
+        o (:objective e)
+        ]
+    (t/is (== 6 (sut/constant-value o)))))
+
