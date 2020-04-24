@@ -527,15 +527,14 @@
 
         invalid-cons
         (keep
-         (fn [{b :body l :lower u :upper} (constraint-bodies lp)
-
-              cv (and (is-constant? b) (constant-value b))
-              ]
-           (when (or (and l u (> l u))
-                     (and cv
-                          (and l (> l cv))
-                          (and u (< u cv))))
-             ["A constraint has impossible bounds" l b u])))
+         (fn [{b :body l :lower u :upper}]
+           (let [cv (and (is-constant? b) (constant-value b))]
+             (when (or (and l u (> l u))
+                       (and cv
+                            (and l (> l cv))
+                            (and u (< u cv))))
+               ["A constraint has impossible bounds" l b u])))
+         (constraint-bodies lp))
 
         problems (concat invalid-vars invalid-cons)
         ]
