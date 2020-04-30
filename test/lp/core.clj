@@ -92,7 +92,6 @@
                    (== 1 (:y (sut/linear-coefficients c)))
                    )))))
 
-
 (t/deftest variable-shorthands
   (t/is (= (sut/expand-indices
             {:x {:indexed-by [#{1 2} #{:a :b}]}})
@@ -138,6 +137,42 @@
         ]
     (t/is (= {1 1, 2 9} (-> (sut/collapse-indices orig-vars results) :x :value)))))
 
+(t/deftest result-var-types
+  (t/is
+   (= true
+      (-> {:x {:type :binary :value 1}}
+          (sut/fix-var-types)
+          :x :value)))
+  (t/is
+   (= false
+      (-> {:x {:type :binary :value 0.001}}
+          (sut/fix-var-types)
+          :x :value)))
+  (t/is
+   (= false
+      (-> {:x {:type :binary :value false}}
+          (sut/fix-var-types)
+          :x :value)))
+  (t/is
+   (= 1
+      (-> {:x {:type :integer :value 1.0}}
+          (sut/fix-var-types)
+          :x :value)))
+  (t/is
+   (= 1
+      (-> {:x {:type :integer :value 1.0002}}
+          (sut/fix-var-types)
+          :x :value)))
+  (t/is
+   (= {:a false :b true}
+      (-> {:x {:type :binary :value {:a 0 :b 1}}}
+          (sut/fix-var-types)
+          :x :value)))
+  (t/is
+   (= {:a 0 :b 2}
+      (-> {:x {:type :integer :value {:a 0.0 :b 2.0}}}
+          (sut/fix-var-types)
+          :x :value))))
 
 (t/deftest upper-bound-access
   (let [e (sut/normalize

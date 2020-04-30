@@ -461,6 +461,26 @@
          (assoc vars k v)))
      {} output-vars)))
 
+(defn fix-var-types [vars]
+  (->> vars
+       (s/transform
+        [s/MAP-VALS
+         (s/selected? [:type #{:binary :integer}])
+         (s/collect-one [:type])
+         :value]
+        (fn fix-value [type value]
+          (cond
+            (map? value)
+            (s/transform [(s/putval type) s/MAP-VALS] fix-value value)
+            
+            (and (number? value) (= :binary type))
+            (if (> value 0.1) true false)
+            
+            (and (number? value) (= :integer type))
+            (int value)
+
+            true value)))))
+
 (defn merge-results
   "Add results back onto an lp.
   If the original lp is not normalized it might have vars that are :indexed-by
@@ -470,7 +490,8 @@
 
   (let [result-vars (collapse-indices (:vars lp) (:vars result))]
     (-> lp
-        (update :vars #(merge-with merge %1 %2) result-vars)
+        (update :vars #(fix-var-types
+                        (merge-with merge %1 %2)) result-vars)
         (assoc :solution (:solution result)))))
 
 (defn constraint-bodies
