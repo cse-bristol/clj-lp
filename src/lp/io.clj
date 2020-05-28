@@ -370,74 +370,62 @@
   objno x y  (x and y are codes)
   "
   [text var-index]
-  (let [lines              (remove s/blank? (s/split-lines text))
-        [junk _ lines]     (partition-by #{"Options"} lines)
-        [num-opts & lines] lines
-        num-opts           (Integer/parseInt num-opts)
-        weird              (> num-opts 4) ;; no idea what this means
-        num-opts           (if weird (- num-opts 2) num-opts)
-        [opt-vals lines]   (split-at (+ (if weird 5 4) num-opts) lines) ;; not sure why + 4
+  (try (let [lines              (remove s/blank? (s/split-lines text))
+             [junk _ lines]     (partition-by #{"Options"} lines)
+             [num-opts & lines] lines
+             num-opts           (Integer/parseInt num-opts)
+             weird              (> num-opts 4)                               ;; no idea what this means
+             num-opts           (if weird (- num-opts 2) num-opts)
+             [opt-vals lines]   (split-at (+ (if weird 5 4) num-opts) lines) ;; not sure why + 4
 
-        ;; these are the only two values in here that we use
-        n-vars (Integer/parseInt (nth opt-vals (+ num-opts 3)))
-        n-cons (Integer/parseInt (nth opt-vals (+ num-opts 1)))
+             ;; these are the only two values in here that we use
+             n-vars (Integer/parseInt (nth opt-vals (+ num-opts 3)))
+             n-cons (Integer/parseInt (nth opt-vals (+ num-opts 1)))
 
-        [cons-vals lines]  (split-at n-cons lines)
-        [var-vals lines]   (split-at n-vars lines)
+             [cons-vals lines] (split-at n-cons lines)
+             [var-vals lines]  (split-at n-vars lines)
 
-        read-double #(Double/parseDouble %)
-        cons-vals (map read-double cons-vals)
-        var-vals  (map read-double var-vals)
+             read-double #(Double/parseDouble %)
+             cons-vals   (map read-double cons-vals)
+             var-vals    (map read-double var-vals)
 
-        [objno & lines] lines
+             [objno & lines] lines
 
-        [_ sc1 sc2] (s/split objno #" ")
+             [_ sc1 sc2] (s/split objno #" ")
 
-        sc1 (Integer/parseInt sc1)
-        sc2 (Integer/parseInt sc2)
-        ]
-    {:vars
-     (->> (map-indexed
-           (fn [i v]
-             [(get var-index i)
-              {:value v}])
-           var-vals)
-          (into {}))
+             sc1 (Integer/parseInt sc1)
+             sc2 (Integer/parseInt sc2)
+             ]
+         {:vars
+          (->> (map-indexed
+                (fn [i v]
+                  [(get var-index i)
+                   {:value v}])
+                var-vals)
+               (into {}))
 
-     :solution
-     {:status
-      (cond
-        (<= 0 sc2 99)
-        :optimal
+          :solution
+          {:exists  (<= 0 sc2 199)
+           :reason  (cond
+                      (<= 0 sc2 99)
+                      :optimal
+                      
+                      (<= 200 sc2 299)
+                      :infeasible
 
-        (<= 100 sc2 199)
-        :feasible
-        
-        (<= 200 sc2 299)
-        :infeasible
+                      (<= 300 sc2 399)
+                      :unbounded
+                      
+                      true
+                      :unknown)
+           }})
 
-        (<= 300 sc2 399)
-        :unbounded
-
-        (<= 400 sc2 499)
-        :feasible
-
-        (<= 500 sc2 599)
-        :error
-
-        true
-        :unknown)
-
-      ;; unfortunately we can't take a value, because .sol need not contain one.
-      }
-     }
-    
-    ;; {:vars var-vals
-    ;;  :cons cons-vals
-    ;;  :objno objno
-    ;;  }
-
-    ))
+       (catch Exception e
+         {:solution
+          {:exists false
+           :reason :error
+           :error (.getMessage e)}}))
+  )
 
 (comment
   (println

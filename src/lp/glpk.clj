@@ -26,17 +26,27 @@
 
           read-mip-sol
           (fn [[_ _ status obj-val] lines]
-            (let [obj-val (Double/parseDouble obj-val)]
+            
+            (let [obj-val (try (Double/parseDouble obj-val)
+                               (catch NumberFormatException e))]
+              
               {:solution
-               {:value obj-val
-                :status
-                (cond
-                  (= "n" status) :infeasible
-                  (= "u" status) :unknown
-                  (> (Math/abs obj-val) 1e18) :unbounded
-                  (= "f" status) :feasible
-                  (= "o" status) :optimal)}
-               
+               (cond
+                 (= "n" status)
+                 {:exists false :reason :infeasible}
+
+
+                 (> (Math/abs obj-val) 1e18)
+                 {:exists false :reason :unbounded}
+
+                 (= "u" status)
+                 {:reason :unknown :exists (number? obj-val) :value obj-val}
+                 
+                 (= "f" status)
+                 {:exists true :value obj-val}
+
+                 (= "o" status)
+                 {:exists true :optimal true})
                :vars
                (->>
                 (for [[_ n value] (get lines "j")]
@@ -44,29 +54,33 @@
                    (cond-> {}
                      value (assoc :value  (Double/parseDouble value)))])
                 (into {}))}))
+          
 
           read-bas-sol
           (fn [[prows pcols pstat dstat obj-val] lines]
             {:solution
-             {:value (Double/parseDouble obj-val)
-              :status
-              (cond
-                (or (= dstat "n") (= pstat "n")) :unbounded
-                (= pstat "i") :infeasible
-                (= pstat "u") :unknown
-                (= pstat "f") :optimal)}
+             (let [reason (cond
+                            (or (= dstat "n") (= pstat "n")) :unbounded
+                            (= pstat "i")                    :infeasible
+                            (= pstat "u")                    :unknown
+                            (= pstat "f")                    :optimal)]
+               {:value   (try (Double/parseDouble obj-val) (catch NumberFormatException e))
+                :exists  (= reason :optimal)
+                :optimal (= reason :optimal)
+                :reason  reason
+                })
              
              :vars
              (->>
               (for [[_ n st primal dual] (get lines "j")]
                 [(get index-to-variable (dec (Integer/parseInt n)))
                  (cond-> {}
-                   st (assoc :status (var-status-codes st))
+                   st     (assoc :status (var-status-codes st))
                    primal (assoc :value  (Double/parseDouble primal))
-                   dual (assoc :dual-value   (Double/parseDouble dual))
+                   dual   (assoc :dual-value   (Double/parseDouble dual))
                    )])
-              (into {}))})
-          ]
+              (into {}))})]
+      
       (case (second status)
         "mip" (read-mip-sol (drop 2 status) lines)
         "bas" (read-bas-sol (drop 2 status) lines)
