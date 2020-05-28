@@ -252,14 +252,16 @@
      :evaluator
      (let [obj (:objective lp)
            C (lp/constant-value obj)
-           G (lp/linear-coefficients obj)
-           ]
+           G (lp/linear-coefficients obj)]
        (fn [vars]
-         (println vars C G)
-         (reduce-kv
-          (fn [a k v]
-            (+ a (* (get G k) (:value v 0.0))))
-          C vars)))
+         (when (every?
+                number?
+                (map (comp :value vars))
+                (keys G))
+           (reduce-kv
+            (fn [a x coeff]
+              (+ a (* coeff (:value (vars x)))))
+            C G))))
      
      :program
      (with-out-str
