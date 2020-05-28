@@ -256,8 +256,7 @@
        (fn [vars]
          (when (every?
                 number?
-                (map (comp :value vars))
-                (keys G))
+                (map (comp :value vars) (keys G)))
            (reduce-kv
             (fn [a x coeff]
               (+ a (* coeff (:value (vars x)))))
