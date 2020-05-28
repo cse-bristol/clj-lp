@@ -48,7 +48,6 @@
 
 (defn extract-scip-status [scip-status]
   (let [[_ a b] (re-find #"(.+?) *\[(.+)\]" scip-status)]
-    (println a b)
     (cond
       (= a "problem is solved")
       {:reason (scip-statuses b :unknown)}
@@ -61,9 +60,7 @@
       {:exists false :reason :error :error b}
       
       :else
-      {}
-      )
-    ))
+      {})))
 
 
 (defn solve [lp & {:keys [scipampl]
