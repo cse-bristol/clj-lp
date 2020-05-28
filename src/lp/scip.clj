@@ -101,22 +101,19 @@
         gap          (extract-double gap)
         primal-bound (extract-double primal-bound)
         dual-bound   (extract-double dual-bound)
-
+        value        (evaluator (:vars result))
+        scip-status  (extract-scip-status scip-status)
+        
         result
-        (cond-> result
-          (#{:feasible :optimal} (-> result :solution :status))
-          (assoc-in [:solution :value]
-                    (evaluator (:vars result)))
-
-          gap
-          (assoc-in [:solution :gap] gap)
-
-          (and primal-bound dual-bound)
-          (assoc-in [:solution :bounds] [primal-bound dual-bound])
-
-          scip-status
-          (update :solution merge
-                    (extract-scip-status scip-status)))]
+        (update result :solution
+                merge
+                scip-status
+                (when value {:value value})
+                (when gap {:gap gap})
+                (when (or dual-bound primal-bound)
+                  {:bounds [primal-bound dual-bound]}))
+        ]
+    
     (lp/merge-results lp result)))
 
 ;; "/nix/store/ijhl69ka24hwg58hg3pmak0zdrkd49y9-run-solver-env/bin/scipampl"
