@@ -36,6 +36,7 @@
 (comment
   (scip/solve
    diet
-   :scipampl "/nix/store/ijhl69ka24hwg58hg3pmak0zdrkd49y9-run-solver-env/bin/scipampl"
    :time-limit 50
-   ))
+   )
+
+  )
