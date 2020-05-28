@@ -438,12 +438,27 @@
 
 (defmethod linear? :default [_] false)
 
-(defn collapse-indices [input-vars output-vars]
-  (let [indexed-vars (set (for [[k v] input-vars :when (seq (:indexed-by v))] k))]
+(defn collapse-indices
+  "Output vars have had their indices blown up, whereas input vars
+  may (a) have index set and (b) be defined by functions
+
+  We need to (a) roll up the indices of output vars, and (b) copy the
+  values of any fixed variables in the input.
+  "
+  [input-vars output-vars]
+  (let [indexed-vars    (set (for [[k v] input-vars :when (seq (:indexed-by v))] k))
+        ;; TODO this is a bit wasteful, as it's already been done
+        ;; once. We could change the API to add results of each pass
+        ;; onto the program I guess, so all operations can be chained up.
+        expanded-inputs (expand-indices input-vars)
+
+        ;; copy across what we know
+        output-vars (merge-with merge expanded-inputs output-vars)
+        ]
     (reduce-kv
      (fn [vars k v]
        (if (and (vector? k) (indexed-vars (first k)))
-         (let [var (first k)
+         (let [var   (first k)
                index (rest k)
                index (if (singleton? index)
                        (first index)
@@ -453,10 +468,22 @@
                vars
              (:value v)
              (update-in [var :value] assoc index (:value v))
+             
              (:dual-value v)
              (update-in [var :dual-value] assoc index (:dual-value v))
+             
              (:status v)
-             (update-in [var :status] assoc index (:status v))))
+             (update-in [var :status] assoc index (:status v))
+
+             (:fixed v)
+             (update-in [var :fixed] assoc index (:fixed v))
+
+             (:upper v)
+             (update-in [var :upper] assoc index (:upper v))
+
+             (:lower v)
+             (update-in [var :lower] assoc index (:lower v))
+             ))
 
          (assoc vars k v)))
      {} output-vars)))

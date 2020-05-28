@@ -185,3 +185,21 @@
         ]
     (t/is (== 6 (sut/constant-value o)))))
 
+(t/deftest fixed-indexed-values
+  (let [is #{:a :b}
+        js #{:x :y}
+        lp {:vars {:x {:type :integer :indexed-by [is js]
+                       :value (fn [i j] 12)
+                       :fixed (fn [i j] (or (= :a i) (= :y j)))
+                       
+                       }}}
+
+        results
+        {:vars {[:x :b :x] {:value 99}}}
+
+        lp (sut/merge-results lp results)
+        ]
+
+    lp
+    )
+  )
