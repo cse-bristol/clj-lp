@@ -12,7 +12,8 @@
 (defn solve [lp & {:keys [scipampl]
                    :or {scipampl "scipampl"}
                    :as settings}]
-  (let [{problem-text :program var-index :index-to-var}
+  (let [{problem-text :program var-index :index-to-var
+         evaluator :evaluator}
         (lpio/nl lp)
         
         result-text
@@ -29,7 +30,17 @@
           (slurp (io/file temp-dir "problem.sol")))
 
         ;; need solution format here
-        result (lpio/sol result-text var-index)]
+        result (lpio/sol result-text var-index)
+
+        result
+        (cond
+          (#{:feasible :optimal} (-> result :solution :status))
+          (assoc-in result [:solution :value]
+                    (evaluator (:vars result)))
+
+          true
+          result)
+        ]
     (lp/merge-results lp result)))
 
 ;; "/nix/store/ijhl69ka24hwg58hg3pmak0zdrkd49y9-run-solver-env/bin/scipampl"

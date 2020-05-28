@@ -249,6 +249,18 @@
     
     {:index-to-var index-to-var
      :var-to-index var-to-index
+     :evaluator
+     (let [obj (:objective lp)
+           C (lp/constant-value obj)
+           G (lp/linear-coefficients obj)
+           ]
+       (fn [vars]
+         (println vars C G)
+         (reduce-kv
+          (fn [a k v]
+            (+ a (* (get G k) (:value v 0.0))))
+          C vars)))
+     
      :program
      (with-out-str
        (println "g3 1 1 0") ;; I don't know what 3 1 1 0 is
@@ -358,7 +370,6 @@
   objno x y  (x and y are codes)
   "
   [text var-index]
-
   (let [lines              (remove s/blank? (s/split-lines text))
         [junk _ lines]     (partition-by #{"Options"} lines)
         [num-opts & lines] lines
@@ -379,7 +390,11 @@
         var-vals  (map read-double var-vals)
 
         [objno & lines] lines
-        
+
+        [_ sc1 sc2] (s/split objno #" ")
+
+        sc1 (Integer/parseInt sc1)
+        sc2 (Integer/parseInt sc2)
         ]
     {:vars
      (->> (map-indexed
@@ -387,7 +402,35 @@
              [(get var-index i)
               {:value v}])
            var-vals)
-          (into {}))}
+          (into {}))
+
+     :solution
+     {:status
+      (cond
+        (<= 0 sc2 99)
+        :optimal
+
+        (<= 100 sc2 199)
+        :feasible
+        
+        (<= 200 sc2 299)
+        :infeasible
+
+        (<= 300 sc2 399)
+        :unbounded
+
+        (<= 400 sc2 499)
+        :feasible
+
+        (<= 500 sc2 599)
+        :error
+
+        true
+        :unknown)
+
+      ;; unfortunately we can't take a value, because .sol need not contain one.
+      }
+     }
     
     ;; {:vars var-vals
     ;;  :cons cons-vals
