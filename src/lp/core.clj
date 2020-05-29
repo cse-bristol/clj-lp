@@ -89,7 +89,7 @@
     (fn [a e]
       (if (and (seq? e) (not (vector? e)))
         (concat a (norm-exprs e))
-        (conj a (norm-expr e))))
+        (conj a (with-meta (norm-expr e) {:input e}))))
     [] exprs)))
 
 (defmethod norm-expr :number   [x] (Sum. {::c (double x)}))
@@ -348,12 +348,15 @@
      {} vars)))
 
 (defn add-bounds [var]
-  (cond-> var
-    (= (:type var) :non-negative)
-    (update :lower (fn [l] (max (or l 0) 0)))
-    
-    (= (:type var) :binary)
-    (assoc :lower 0 :upper 1)))
+  (try (cond-> var
+         (= (:type var) :non-negative)
+         (update :lower (fn [l] (max (or l 0) 0)))
+         
+         (= (:type var) :binary)
+         (assoc :lower 0 :upper 1))
+       (catch Exception e
+         (throw (ex-info "Adding bounds to var" {:var var} e))
+         )))
 
 (defn normalize
   "Given `lp`, return a normalized form of it, unless already done.
@@ -391,16 +394,19 @@
                          ))
 
               lp (-> lp
-                     (->> (s/transform [:vars s/MAP-VALS] add-bounds))
-                     (update :vars expand-indices)) ;; simplifies vars which are an xprod
+                     (update :vars expand-indices)
+                     (->> (s/transform [:vars s/MAP-VALS] add-bounds)))
               
               lp (binding [*lp-vars* (:vars lp)]
                    (->> lp
                         (s/transform [:constraints s/MAP-VALS]
                                      (fn [c]
-                                       (if (and (seq? c) (not (vector? c)))
-                                         (norm-expr [:and c])
-                                         (norm-expr c)
+                                       (with-meta
+                                         (if (and (seq? c) (not (vector? c)))
+                                           (norm-expr [:and c])
+                                           (norm-expr c)
+                                           )
+                                         {:input c}
                                          )))
                         
                         (s/transform [:objective] norm-expr)))
@@ -532,15 +538,14 @@
              [c]
 
              (instance? Conjunction c)
-
              (:body c)))))
 
 (defn nontrivial-constraint-bodies
   "Like `constraint-bodies`, with trivial constraints removed"
   [lp]
   (remove
-   (fn [{lb :lower ub :upper b :body}]
-     (or (not (or lb ub)) (is-constant? b)))
+   (fn [{:keys [body lower upper]}]
+     (or (and (nil? lower) (nil? upper)) (is-constant? body)))
    (constraint-bodies lp)))
 
 (defn linear-variable [p]
@@ -551,10 +556,9 @@
 (defmethod linear-coefficients Sum [sum]
   (reduce
    (fn [acc [term weight]]
-     (when (linear? term)
+     (if (and (linear? term) (not (zero? weight)))
        (let [term (simplify-product term)
-             x    (linear-variable term)
-             ]
+             x    (linear-variable term)]
          (assoc acc x (+ weight (get acc x 0))))))
    {} (:terms sum)))
 

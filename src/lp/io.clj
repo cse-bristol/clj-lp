@@ -40,10 +40,16 @@
 
   Given `lp`, returns {:program \"cplex text\" :vars {0 :x 1 :y etc}
   "
-  [lp]
+  [lp & {:keys [comments]}]
   (let [lp         (lp/normalize lp)
         _          (assert (lp/linear? lp) "Only linear programs for cplex")
-        var-order  (map-indexed vector (keys (:vars lp)))
+        free-vars  (into {} (filter (comp not :fixed second) (:vars lp)))
+        var-order  (map-indexed
+                    (fn [i v]
+                      (let [x (str "x_" i "_"
+                                   (.replaceAll (str v) "[^A-Za-z0-9]+" "_"))]
+                        [x v]))
+                    (keys free-vars))
         var-rindex (into {} var-order)
         var-index  (map-invert var-rindex)
 
@@ -52,7 +58,7 @@
           (let [grad (lp/linear-coefficients sum)]
             (doseq [[x k] grad]
               (when-not (or (lp/is-zero? k)
-                            (and (not constant-value) (= :c x)))
+                            (and (= :lp.core/c x)))
                 (if (>= k 0)
                   (print "+ ")
                   (print "- "))
@@ -61,11 +67,19 @@
                   (print (Math/abs k))
                   (print " "))
                 
-                (when-not (= :c x)
-                  (print (str "x" (get var-index x)))
-                  
-                  (print " "))))
-            ))]
+                (let [i (get var-index x)]
+                  (when-not i
+                    (throw (ex-info "A variable has appeared in an expression which was not in the variable list"
+                                    {:variable x})))
+                  (print i))))
+            (when constant-value
+                (let [c (:lp.core/c grad 0)]
+                  (when-not (zero? c)
+                    (if (>= c 0)
+                      (print "+ ")
+                      (print "- "))
+                    (print (Math/abs c)))))))]
+    
 
     {:index-to-var var-rindex
      :var-to-index var-index
@@ -79,11 +93,17 @@
          (println)
          (println)
          (println "subject to")
-         (doseq [{body :body ub :upper lb :lower} cons]
-           (let [constant-term (or (lp/constant-value body) 0)
+         (doseq [[index constraint] (map-indexed vector cons)]
+           (let [{body :body ub :upper lb :lower} constraint
+                 
+                 constant-term (or (lp/constant-value body) 0)
                  lb (and lb (- lb constant-term))
                  ub (and ub (- ub constant-term))
                  ]
+             (when comments
+               (println "\\ Constraint " index
+                        "=>" (:input (meta constraint))))
+             (printf "C%d: " index)
              (print-sum body)
              (cond
                (and ub lb (== ub lb))
@@ -106,30 +126,34 @@
          (let [{lb :lower ub :upper} (get (:vars lp) v)]
            (cond
              (and lb ub (== lb ub))
-             (printf "x%d = %s\n" i lb)
+             (printf "%s = %s\n" i lb)
 
              (and (not lb) (not ub))
-             (printf "x%d free\n" i)
+             (printf "%s free\n" i)
 
+             (not ub)
+             (printf "%s >= %s\n" i lb)
+             
+             (not lb)
+             (printf "%s <= %s\n" i ub)
+             
              :else
              (printf
-              "%s <= x%d <= %s\n"
-              (or lb "-inf")
-              i
-              (or ub "+inf")))))
+              "%s <= %s <= %s\n"
+              lb i ub))))
 
        ;; variable types
        (let [{int-vars :integer
               bin-vars :binary}
-             (group-by (comp :type second) (:vars lp))]
+             (group-by (comp :type second) free-vars)]
          (when (seq int-vars)
            (println "integer")
            (doseq [n (map first int-vars)]
-             (printf "x%d\n" (get var-index n))))
+             (printf "%s\n" (get var-index n))))
          (when (seq bin-vars)
            (println "binary")
            (doseq [n (map first bin-vars)]
-             (printf "x%d\n" (get var-index n)))))
+             (printf "%s\n" (get var-index n)))))
        
        (println "end")
        )}))
@@ -144,6 +168,8 @@
   :vars is a map from variable number to variable name in the input program.
 
   Currently requires that the input program be linear, although nl files do not.
+
+  May not work right - seems to make scipampl die with large programs
   "
   [lp]
   ;; precondition - lp is linear?
@@ -180,32 +206,8 @@
         count-variables
         (fn [x] (count (dissoc (lp/linear-coefficients x) ::lp/c)))
         
-        ;; count-variables
-        ;; (fn count-variables [x]
-        ;;   (cond
-        ;;     (instance? lp.core.Product x)
-        ;;     (count (remove lp/is-zero? (vals (:factors x))))
-
-        ;;     (instance? lp.core.Sum x)
-        ;;     (reduce + 0 (map count-variables (keys (:terms x))))
-
-        ;;     (number? x) 0
-
-        ;;     ;; our precondition should save us from trouble here
-        ;;     :else 0))
-
-
         nz-jacobians  (reduce + 0 (for [c constraints] (count-variables (:body c))))
         gradients     (count-variables (:objective lp))
-        
-        factor-index
-        (fn [x]
-          (when-let [factors (:factors x)]
-            (get var-to-index
-                 (first
-                  (for [[f e] factors
-                        :when (lp/is-one? e)]
-                    f)))))
         
         print-gradient
         (fn [x]
@@ -252,15 +254,29 @@
      :evaluator
      (let [obj (:objective lp)
            C (lp/constant-value obj)
-           G (lp/linear-coefficients obj)]
-       (fn [vars]
-         (when (every?
-                number?
-                (map (comp :value vars) (keys G)))
-           (reduce-kv
-            (fn [a x coeff]
-              (+ a (* coeff (:value (vars x)))))
-            C G))))
+           G (dissoc (lp/linear-coefficients obj) :lp.core/c)]
+       (if (empty? G)
+         (constantly C)
+         (fn [vars]
+           (cond
+             (empty? vars)
+             nil
+
+             (every?
+              number?
+              (map (comp :value vars) (keys G)))
+             (reduce-kv
+              (fn [a x coeff]
+                (+ a (* coeff (:value (vars x)))))
+              C G)
+
+             :else
+             (do (println "Missing some vars in solution?")
+                 (println "Given: " vars)
+                 (println "Missing: " (remove
+                                       (comp number? :value vars)
+                                       (keys G))))
+             ))))
      
      :program
      (with-out-str
@@ -318,7 +334,7 @@
        (doseq [[var-name var] var-order]
          ;; this is also like table 17
          (let [{lower :lower upper :upper} var]
-           (print-bound lower upper var)))
+           (print-bound lower upper (assoc var :name var-name))))
 
        ;; jacobian sparsity information
        (printf "k%d # intermediate jacobian col lengths\n"

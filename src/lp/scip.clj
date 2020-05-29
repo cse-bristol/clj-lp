@@ -3,7 +3,8 @@
             [lp.io :as lpio]
             [clojure.java.io :as io]
             [clojure.java.shell :as sh]
-            [clojure.string :as s]))
+            [clojure.string :as s]
+            [clojure.test :as test]))
 
 (def scip-setting-keys
   {:time-limit "limits/time"
@@ -41,77 +42,170 @@
    "infeasible or unbounded"            :infeasible
    "termination signal received"        :killed
    ;; "invalid status code <%d>"
-   }
-  
+   })
 
-  )
+(defn format-settings [settings]
+  (s/join
+   "\n"
+   (for [[k v] settings]
+     (format "%s = %s" (scip-setting-keys k k) v))))
 
-(defn extract-scip-status [scip-status]
-  (let [[_ a b] (re-find #"(.+?) *\[(.+)\]" scip-status)]
-    (cond
-      (= a "problem is solved")
-      {:reason (scip-statuses b :unknown)}
-      
-      (= a "solving was interrupted")
-      {:reason (scip-statuses b :unknown)
-       :exists false}
+(defn colon-separate [line]
+  (vec (drop 1 (re-find #" *(.+?) *: *(.*) *" line))))
 
-      (.startsWith b "invalid status code")
-      {:exists false :reason :error :error b}
-      
-      :else
-      {})))
-
-
-(defn solve [lp & {:keys [scipampl]
-                   :or   {scipampl "scipampl"}
-                   :as   settings}]
-  (let [{problem-text :program var-index :index-to-var
-         evaluator    :evaluator}
-        (lpio/nl lp)
-        
-        outputs
-        (lpio/with-temp-dir temp-dir
-          (spit (io/file temp-dir "problem.nl") problem-text)
-          (spit (io/file temp-dir "scip.set")
-                (s/join
-                 "\n"
-                 (for [[k v] (dissoc settings :scipampl)]
-                   (format "%s = %s" (scip-setting-keys k k) v))))
-          (let [run
-                (sh/sh
-                 ;; need right args here
-                 scipampl "problem.nl" "scip.set" :dir temp-dir)
-
-                sol (slurp (io/file temp-dir "problem.sol"))
-                ]
-            (assoc run :sol sol)
+(defn parse-statistics-file [f]
+  {:test #(test/is
+           (= {:gap 0.0
+               :bounds [3.16 3.16]}
+              (parse-statistics-file
+               (java.io.StringReader.
+                "Solution           :
+  Solutions found  :          2 (2 improvements)
+  First Solution   : +3.89000000000000e+00   (in run 1, after 1 nodes, 0.00 seconds, depth 2, found by <vbounds>)
+  Gap First Sol.   :      69.13 %
+  Gap Last Sol.    :      37.39 %
+  Primal Bound     : +3.16000000000000e+00   (in run 1, after 1 nodes, 0.00 seconds, depth 2, found by <vbounds>)
+  Dual Bound       : +3.16000000000000e+00
+  Gap              :       0.00 %
+  Avg. Gap         :       0.00 % (0.00 primal-dual integral)
+"
+                ))))}
+  (try
+    (let [lines (-> (slurp f)
+                    (s/split-lines)
+                    ;; the output is in groups with headings not
+                    ;; starting with whitespace
+                    (->> (partition-by #(.startsWith % " "))
+                         (partition-all 2))
+                    ;; so now we have like
+                    ;; [[[header],[lines ...]] ...]
+                    
+                    (->> (map (fn [[[header] lines]]
+                                (let [[header-name header-value] (colon-separate header)
+                                      line-parts (map colon-separate lines)
+                                      ]
+                                  
+                                  [header-name
+                                   (merge (when-not (s/blank? header-value)
+                                            {:value header-value})
+                                          (into {} (map colon-separate lines)))])))
+                         (into {})))
+          
+          get-double
+          (fn [s]
+            (try
+              ;; TODO infinity / -infinity
+              (let [[_ v] (re-find
+                           #"([+-]?\d+(.\d+)?(e[+-]\d+)?)"
+                           s)]
+                (Double/parseDouble v))
+              (catch Exception e))
             )
-          )
+          ]
+      {:gap (let [gap-percent (get-double (get-in lines ["Solution" "Gap"]))]
+              (when gap-percent (/ gap-percent 100.0)))
+       :bounds [(get-double (get-in lines ["Solution" "Dual Bound"]))
+                (get-double (get-in lines ["Solution" "Primal Bound"]))]})
+    (catch Exception e {})))
 
-        result (lpio/sol (:sol outputs) var-index)
+(defn parse-output-file [f var-index]
+  (try (let [f                     (slurp f)
+             lines                 (s/split-lines f)
+             [status-line & lines] lines
 
-        ;; SCIP puts some useful stuff in stdout that we can pick up
-        {:keys [gap scip-status primal-bound dual-bound]}
-        (extract-messages (:out outputs))
+             status-text (s/trim (second (s/split status-line #":")))
 
-        gap          (extract-double gap)
-        primal-bound (extract-double primal-bound)
-        dual-bound   (extract-double dual-bound)
-        value        (evaluator (:vars result))
-        scip-status  (extract-scip-status scip-status)
-        
-        result
-        (update result :solution
-                merge
-                scip-status
-                (when value {:value value})
-                (when gap {:gap gap})
-                (when (or dual-bound primal-bound)
-                  {:bounds [primal-bound dual-bound]}))
-        ]
-    
-    (lp/merge-results lp result)))
+             status (scip-statuses status-text :unknown)
 
-;; "/nix/store/ijhl69ka24hwg58hg3pmak0zdrkd49y9-run-solver-env/bin/scipampl"
+             [next-line & lines] lines
+             ]
+
+         (if (or (not next-line)
+                 (= next-line "no-solution-available")
+                 (not (.startsWith next-line "objective value:")))
+           {:solution {:exists false :reason status}}
+           (let [objective-value (s/trim (second (s/split next-line #":")))
+                 objective-value (try (Double/parseDouble objective-value)
+                                      (catch Exception e
+                                        (throw (ex-info "Parsing objective value line"
+                                                        {:line next-line}
+                                                        e))))
+                 ]
+             {:solution {:exists  true
+                         :value   objective-value
+                         :reason  status
+                         :optimal (= status :optimal)}
+              :vars
+              (into {}
+                    (for [line lines]
+                      (let [[x v] (s/split line #" +")
+                            v     (try (Double/parseDouble v)
+                                       (catch Exception e
+                                         (throw (ex-info
+                                                 "Error parsing value line in output"
+                                                 {:line line}
+                                                 e)))
+                                       
+                                       )
+                            x     (get var-index x)]
+                        [x {:value v}])))
+              })))
+       (catch Exception e
+         (clojure.stacktrace/print-throwable e)
+         (println)
+         (clojure.stacktrace/print-stack-trace e)
+         (println)
+         (println (slurp f))
+         {:solution {:exists false
+                     :reason :error
+                     :error  (str "Solution parse error: " (.getMessage e)
+                                  )}})))
+
+(defn solve [lp & {:keys [scip]
+                   :or {scip "scip"}
+                   :as settings}]
+  (let [{problem-text :program var-index :index-to-var}
+        (lpio/cplex lp)]
+    (lpio/with-temp-dir temp
+      (spit (io/file temp "problem.lp") problem-text)
+      ;; (spit (io/file (format "/home/hinton/tmp/lp/%d-problem.lp"
+      ;;                        (System/currentTimeMillis)
+      ;;                        )) problem-text)
+      (spit (io/file temp "scip.set") (format-settings (dissoc settings :scip)))
+      (spit (io/file temp "commands.txt")
+            "read problem.lp
+optimize
+set write printzeros true
+write solution solution.txt
+write statistics statistics.txt
+quit")
+      (let [{:keys [exit out err]}
+            (sh/sh scip "-s" "scip.set" "-b" "commands.txt" :dir temp)
+
+            output-file (io/file temp "solution.txt")
+            stats-file  (io/file temp "statistics.txt")
+            
+            log (s/join "--\n" [out err])
+
+            solution
+            (cond
+              (not (zero? exit))
+              {:solution {:exists false
+                          :reason :error
+                          :error exit
+                          :log log}}
+
+              (not (.exists output-file))
+              {:solution {:exists false
+                          :reason :error
+                          :error "No output file created"
+                          :log log}}
+
+              :else
+              (-> (parse-output-file output-file var-index)
+                  (update :solution merge
+                          {:log log}
+                          (parse-statistics-file stats-file))))
+            ]
+        (lp/merge-results lp solution)))))
 
