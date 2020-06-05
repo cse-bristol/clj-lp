@@ -10,9 +10,34 @@
   {:time-limit "limits/time"
    :mip-gap "limits/gap"})
 
-(defn- extract-double [s]
-  (try (Double/parseDouble (first (s/split s #" ")))
-       (catch NumberFormatException e)))
+(defn- extract-double
+  {:test
+     #(and
+       (test/is (== 0.0 (extract-double "0")))
+       (test/is (== Double/POSITIVE_INFINITY
+                    (extract-double "+infinity")))
+       (test/is (== Double/NEGATIVE_INFINITY
+                    (extract-double "-infinity")))
+       (test/is (== 6.3 (extract-double "6.3 cats"))))}
+
+  [s]
+  
+  (try
+    (let [spc (s/index-of s \ )
+          s (if spc
+              (.substring s 0 spc)
+              s)]
+      (cond
+        (= "+infinity" s)
+        Double/POSITIVE_INFINITY
+        (= "-infinity" s)
+        Double/NEGATIVE_INFINITY
+        (= "infinity" s)
+        Double/POSITIVE_INFINITY
+
+        :else
+        (Double/parseDouble s)))
+    (catch NumberFormatException e)))
 
 (defn- extract-messages [scip-output]
   (into {}
