@@ -78,7 +78,7 @@
 (defn colon-separate [line]
   (vec (drop 1 (re-find #" *(.+?) *: *(.*) *" line))))
 
-(defn parse-statistics-file [f]
+(defn parse-statistics-file
   {:test #(test/is
            (= {:gap 0.0
                :bounds [3.16 3.16]}
@@ -95,6 +95,7 @@
   Avg. Gap         :       0.00 % (0.00 primal-dual integral)
 "
                 ))))}
+  [f]
   (try
     (let [lines (-> (slurp f)
                     (s/split-lines)
