@@ -156,7 +156,7 @@
                                                         {:line next-line}
                                                         e))))
                  ]
-             {:solution {:exists  true
+             {:solution {:exists  (not (#{:unbounded :infeasible} status))
                          :value   objective-value
                          :reason  status
                          :optimal (= status :optimal)}
