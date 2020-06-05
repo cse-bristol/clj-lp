@@ -23,7 +23,7 @@
 (defn expression-type [expr]
   (cond
     (number? expr)    :number
-    (*lp-vars* expr)  :variable
+    
     (nil? expr)       :boolean
     (boolean? expr)   :boolean
 
@@ -34,6 +34,8 @@
         (instance? Constraint expr)
         (instance? Conjunction expr)) :identity
 
+    (*lp-vars* expr)  :variable
+    
     (vector? expr)
     ;; a grim hack to make using operators more convenient
     ;; 
@@ -44,23 +46,31 @@
 (def ZERO (Sum. {::c 0.0}))
 (def ONE  (Sum. {::c 1.0}))
 
-(defn is-constant?
-  ([x]
-   (or (number? x)
-       (and (instance? Sum x)
-            (#{#{} #{::c}} (set (keys (:terms x)))))))
-  
-  ([x y]
-   (or (and (number? x) (== y x))
-       (and (instance? Sum x)
-            (when-let [xv (-> x :terms (get ::c))]
-              (== y xv))
-            (= 1 (count (:terms x)))))))
+(let [constant-sum?
+      (fn [x]
+        (let [terms (:terms x)]
+          (or (empty? terms)
+              (and (= 1 (count terms)) (contains? terms ::c)))))
+      
+      ]
+  (defn is-constant?
+    ([x]
+     (or (number? x)
+         (and (instance? Sum x)
+              (constant-sum? x))))
+    
+    ([x y]
+     (or (and (number? x) (== y x))
+         (and (instance? Sum x)
+              (constant-sum? x)
+              (== y (::c (:terms x) 0)))))))
 
 (defn is-one?  [x] (is-constant? x 1))
 (defn is-zero? [x] (is-constant? x 0))
 
-(defn simplify-product [p]
+(defn simplify-product
+  "Given a product, simplify it by removing any x^0 in it"
+  [p]
   (if (= ::c p)
     p
     (let [factors (remove (comp is-zero? second) (:factors p))]
@@ -83,14 +93,17 @@
 
 (defmulti norm-expr expression-type)
 
-(defn norm-exprs [exprs]
-  (doall
-   (reduce
-    (fn [a e]
-      (if (and (seq? e) (not (vector? e)))
-        (concat a (norm-exprs e))
-        (conj a (with-meta (norm-expr e) {:input e}))))
-    [] exprs)))
+(let [norm-exprs!
+      (fn norm-exprs! [exprs acc]
+        (reduce
+         (fn [acc e]
+           (if (and (seq? e) (not (vector? e)))
+             (norm-exprs! e acc)
+             (conj! acc (norm-expr e))))
+         acc exprs))]
+  
+  (defn norm-exprs [exprs]
+    (persistent! (norm-exprs! exprs (transient [])))))
 
 (defmethod norm-expr :number   [x] (Sum. {::c (double x)}))
 (defmethod norm-expr :boolean  [x] (norm-expr (if x 1.0 0.0)))
@@ -243,7 +256,7 @@
             (Constraint. (norm-expr `[:- ~mid ~constant-term])
                          (- (constant-value lb) constant-term)
                          (- (constant-value ub) constant-term)))
-              
+          
           :else
           (norm-expr `[:and
                        [:<= ~lb ~mid]
@@ -255,20 +268,51 @@
 (defmethod norm-expr :and      [[_ & args]]
   ;; several constraints which are all true
   (let [args (norm-exprs args)]
-    (if (every? is-logical? args)
-      (Conjunction.
-       (reduce
-        (fn [acc arg]
-          (cond
-            (instance? Constraint arg)
-            (conj acc arg)
+    (Conjunction.
+     (persistent!
+      (reduce
+       (fn [acc arg]
+         (cond
+           (instance? Constraint arg)
+           (conj! acc arg)
 
-            ;; fold up other conjunctions
-            (instance? Conjunction arg)
-            (concat acc (:body arg))))
-        nil
-        args))
-      (throw (ex-info ":and only applicable to constraints or other ands" {:args args})))))
+           ;; fold up other conjunctions
+           (instance? Conjunction arg)
+           (reduce conj! acc (:body arg))
+
+           (nil? arg)
+           acc
+
+           :else
+           (throw (ex-info "Non-logical argument to :and" {:arg arg}))
+           ))
+       (transient [])
+       args)))))
+
+;; (defmethod norm-expr :and      [[_ & args]]
+;;   ;; several constraints which are all true
+;;   (p :norm-and
+;;      (let [args (norm-exprs args)]
+;;        (Conjunction.
+;;         (reduce
+;;          (fn [acc arg]
+;;            (cond
+;;              (instance? Constraint arg)
+;;              (conj acc arg)
+
+;;              ;; fold up other conjunctions
+;;              (instance? Conjunction arg)
+;;              (into acc (:body arg))
+
+;;              (nil? arg)
+;;              acc
+
+;;              :else
+;;              (throw (ex-info "Non-logical argument to :and" {:arg arg}))
+;;              ))
+;;          []
+;;          args)))))
+
 
 (defmethod norm-expr ::lower [[_ v]]
   (norm-expr (:lower (get *lp-vars* v) (- Double/MAX_VALUE))))
@@ -367,7 +411,6 @@
   - Constraints are not fixed up for canonical form
   "
   [lp]
-  
   (if (instance? Program lp)
     lp
     (if (spec/valid? :lp/program lp)
@@ -380,6 +423,7 @@
                subject-to :subject-to
                constraints :constraints}
               lp
+
               lp (cond->
                      lp (not obj)
                      (cond-> 
@@ -396,17 +440,25 @@
               lp (-> lp
                      (update :vars expand-indices)
                      (->> (s/transform [:vars s/MAP-VALS] add-bounds)))
-              
+
               lp (binding [*lp-vars* (:vars lp)]
                    (->> lp
+                        (s/setval [:constraints s/MAP-VALS nil?] s/NONE)
                         (s/transform [:constraints s/MAP-VALS]
                                      (fn [c]
-                                       (with-meta
-                                         (if (and (seq? c) (not (vector? c)))
-                                           (norm-expr [:and c])
-                                           (norm-expr c)
-                                           )
-                                         {:input c}
+                                       (let [result
+                                             (if (and (seq? c) (not (vector? c)))
+                                               (norm-expr [:and c])
+                                               (norm-expr c)
+                                               )]
+                                         (when-not
+                                             (or (instance? Constraint result)
+                                                 (instance? Conjunction result))
+                                           (throw
+                                            (ex-info "Constraint not a constraint"
+                                                     {:input c
+                                                      :result result})))
+                                         result
                                          )))
                         
                         (s/transform [:objective] norm-expr)))
@@ -531,14 +583,27 @@
   "Given a normalized LP, get all the constraint bodies, ignoring their names.
   Why do we have names?"
   [lp]
-  (apply concat
-         (for [[n c] (:constraints lp)]
-           (cond
-             (instance? Constraint c)
-             [c]
+  (reduce
+   (fn [a c]
+     (cond
+       (instance? Constraint c)
+       (conj a c)
 
-             (instance? Conjunction c)
-             (:body c)))))
+       (instance? Conjunction c)
+       (into a (:body c))
+
+       (nil? c)
+       a
+       
+       :else
+       (throw (ex-info "Unexpected non-constraint object in constraint list!"
+                       {:value c
+                        :meta (meta c)
+                        }
+                       ))
+       ))
+   []
+   (vals (:constraints lp))))
 
 (defn nontrivial-constraint-bodies
   "Like `constraint-bodies`, with trivial constraints removed"
