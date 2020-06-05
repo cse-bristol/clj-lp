@@ -56,7 +56,7 @@
         var-index  (map-invert var-rindex)
 
         print-sum
-        (fn [sum & {:keys [constant-value]}]
+        (fn [sum & {:keys [constant-value new-lines]}]
           (let [grad (lp/linear-coefficients sum)]
             (doseq [[x k] grad]
               (when-not (or (lp/is-zero? k)
@@ -73,7 +73,10 @@
                   (when-not i
                     (throw (ex-info "A variable has appeared in an expression which was not in the variable list"
                                     {:variable x})))
-                  (print i))))
+                  (print i)))
+              (when new-lines
+                (print "\n    ")))
+            
             (when constant-value
                 (let [c (:lp.core/c grad 0)]
                   (when-not (zero? c)
@@ -81,14 +84,13 @@
                       (print "+ ")
                       (print "- "))
                     (print (Math/abs c)))))))]
-    
 
     {:index-to-var var-rindex
      :var-to-index var-index
      :program
      (with-out-str
        (print (name (:sense lp)) " ")
-       (print-sum (:objective lp) :constant-value true)
+       (print-sum (:objective lp) :constant-value true :new-lines true)
 
        ;; constraints
        (when-let [cons (seq (lp/nontrivial-constraint-bodies lp))]
@@ -123,6 +125,7 @@
                    (println ">=" lb))))))
 
        ;; variable bounds
+       (println)
        (println "bounds")
        (doseq [[i v] var-order]
          (let [{lb :lower ub :upper} (get (:vars lp) v)]
