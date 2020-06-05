@@ -1,4 +1,4 @@
-(ns lp.core
+(ns lp.test-core
   (:require [lp.core :as sut]
             [clojure.test :as t]
             [lp.core :as lp]))

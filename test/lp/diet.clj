@@ -1,8 +1,4 @@
-(ns lp.examples
-  (:require [lp.glpk :as glpk]
-            [lp.scip :as scip]
-            [lp.core :as lp]
-            [lp.io :as lpio]))
+(ns lp.diet)
 
 (def foods #{:corn :milk :bread})
 (def nutrients #{:vitA :calories})
@@ -22,21 +18,15 @@
 
    :vars
    (->> (for [f foods]
-          [f {:type :integer
+          [f {:type :non-negative
               :lower 0 :upper (get-in food-params [f :max])}])
         (into {}))
 
    :subject-to
    (for [n nutrients]
-     [:<=
-      (get-in nutrient-limits [n :lower])
-      [:+ (for [f foods] [:* f (get-in food-params [f n])])]
-      (get-in nutrient-limits [n :upper])])})
-
-(comment
-  (scip/solve
-   diet
-   :time-limit 50
-   )
-
-  )
+     [:and 
+      [:<=
+       (get-in nutrient-limits [n :lower])
+       [:+ (for [f foods] [:* f (get-in food-params [f n])])]
+       (get-in nutrient-limits [n :upper])]
+      ])})
