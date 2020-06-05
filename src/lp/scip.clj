@@ -194,9 +194,6 @@
         (lpio/cplex lp)]
     (lpio/with-temp-dir temp
       (spit (io/file temp "problem.lp") problem-text)
-      ;; (spit (io/file (format "/home/hinton/tmp/lp/%d-problem.lp"
-      ;;                        (System/currentTimeMillis)
-      ;;                        )) problem-text)
       (spit (io/file temp "scip.set") (format-settings (dissoc settings :scip)))
       (spit (io/file temp "commands.txt")
             "read problem.lp
@@ -228,10 +225,14 @@ quit")
                           :log log}}
 
               :else
-              (-> (parse-output-file output-file var-index)
-                  (update :solution merge
-                          {:log log}
-                          (parse-statistics-file stats-file))))
+              (let [outputs (parse-output-file output-file var-index)
+                    statistics (parse-statistics-file stats-file)]
+                (-> outputs
+                    (update :solution merge
+                            {:log log}
+                            statistics))
+                )
+              )
             ]
         (lp/merge-results lp solution)))))
 
