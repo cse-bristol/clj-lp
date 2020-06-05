@@ -17,11 +17,13 @@
 (defmacro with-temp-dir [var & body]
   `(let [~var (.toFile
                (Files/createTempDirectory
-                "temp"
+                "linear-program"
                 (into-array java.nio.file.attribute.FileAttribute [] )))]
      (try
        (do ~@body)
-       (finally (delete-files ~var)))))
+       (finally
+         (delete-files ~var)
+         ))))
 
 (defmacro doindexed
   "Iterate for ITEM in SEQUENCE, with INDEX counting from 0"
