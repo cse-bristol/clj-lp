@@ -190,7 +190,8 @@
 (defn solve [lp & {:keys [scip]
                    :or {scip "scip"}
                    :as settings}]
-  (let [{problem-text :program var-index :index-to-var}
+  (let [{problem-text :program var-index :index-to-var
+         constant-term :constant-term}
         (lpio/cplex lp)]
     (lpio/with-temp-dir temp
       (spit (io/file temp "problem.lp") problem-text)
@@ -230,7 +231,10 @@ quit")
                 (-> outputs
                     (update :solution merge
                             {:log log}
-                            statistics))
+                            statistics)
+                    ;; SCIP leaves off the constant term in the objective
+                    (update-in [:solution :value]
+                               + constant-term))
                 )
               )
             ]

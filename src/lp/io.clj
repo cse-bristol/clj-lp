@@ -83,10 +83,15 @@
                     (if (>= c 0)
                       (print "+ ")
                       (print "- "))
-                    (print (Math/abs c)))))))]
+                    (print (Math/abs c)))))))
+        ]
 
     {:index-to-var var-rindex
      :var-to-index var-index
+     :constant-term
+     (let [grad (lp/linear-coefficients (:objective lp))]
+       (:lp.core/c grad 0))
+     
      :program
      (with-out-str
        (print (name (:sense lp)) " ")
