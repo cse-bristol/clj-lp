@@ -354,6 +354,13 @@
   :vars {[:x :a] {:value (some-fn :a)}
          [:x :b] {:value (some-fn :b)}}
 
+  :indexed-by can take two forms:
+  1. A vector of sets:
+     In this form, the indexes used will be the cartesian product of the sets
+  2. A set of vectors
+     In this form, the indexed used will be whatever is in the set.
+     Every index should probably have the same length for this to work right.
+  
   The :value, :lower, :upper, and :fixed parts can support three
   different forms:
 
@@ -370,8 +377,29 @@
     [vars]
     (reduce-kv
      (fn [vars k v]
-       (if-let [indices (:indexed-by v)]
-         (let [singular-index (singleton? indices)
+       (if-let [indices (:indexed-by v)
+
+                ;; if indices is a vector of sets, we want to multiply them out
+                ;; if indices is a set of vectors, this has already been done
+                
+                ]
+         (let [[indices singular-index]
+               (cond
+                 (and (vector? indices)
+                      (every? set? indices))
+                 [(apply cartesian-product indices)
+                  (singleton? indices)]
+
+                 (and (set? indices)
+                      (every? vector? indices))
+                 [indices
+                  (singleton? (first indices))]
+                 
+                 :else
+                 (throw (ex-info
+                         ":indexed-by should be either a vector of sets or a set of vectors" {:var k}
+                         ))
+                 )
                as-fn (if singular-index as-fn-1 as-fn-n)
                value (as-fn (:value v))
                lower (as-fn (:lower v))
@@ -379,7 +407,7 @@
                fixed (as-fn (:fixed v))
                v (dissoc v :indexed-by :value :lower :upper :fixed)
                ]
-           (->> (for [index (apply cartesian-product indices)]
+           (->> (for [index indices]
                   [`[~k ~@index]
                    (cond-> v
                      value (assoc :value (value index))

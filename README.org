@@ -42,7 +42,7 @@ Since this is a common there is a convenience for this, which is to use ~:indexe
 For example,
 
 #+BEGIN_EXAMPLE
-(def x-indices (range 3))
+(def x-indices (set (range 3)))
 (def y-indices #{:fruit :mushroom :rock})
 
 ...
@@ -60,7 +60,21 @@ You can just as well write this out with something like:
    (into {}))
 #+END_EXAMPLE
 
-Or, with multiple variables, a concatenation of these.
+This convenience defines variables for the /cross product/ of the index sets, and is signalled by using a *vector of sets* for ~:indexed-by~
+
+Sometimes this might be a lot more variables than you actually want; if you only want a subset of the cross product you can use a *set of vectors* for ~:indexed-by~.
+
+For example, if we only wanted binary variables for odd numbers in the example above we could write:
+
+#+BEGIN_EXAMPLE
+(def x-indices (set (range 5)))
+(def y-indices #{:fruit :mushroom :rock})
+
+...
+
+:vars {:chosen {:type :binary :indexed-by (set (for [x x-indices y y-indices :when (odd? x)] [x y]))}}
+...
+#+END_EXAMPLE
 
 If using ~:indexed-by~, the ~:value~, ~:upper~, ~:lower~ and ~:fixed~ attributes can be any of
 - A constant value (same for all indices)

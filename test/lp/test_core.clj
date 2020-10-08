@@ -114,6 +114,13 @@
                  :value (fn [x y] [x y])}})
            {[:x 1 :a] {:value [1 :a]}}))
 
+  (t/is (= (sut/expand-indices
+            {:x {:indexed-by #{[1 2 3] [4 5 6]}
+                 :value (fn [x y z] (+ x y z))}})
+
+           {[:x 1 2 3] {:value 6}
+            [:x 4 5 6] {:value 15}}))
+
   (t/is (= (sut/expand-indices {:x {:indexed-by [#{1 2}] :value {1 3, 2 9}}})
            {[:x 1] {:value 3}, [:x 2] {:value 9}}))
 
