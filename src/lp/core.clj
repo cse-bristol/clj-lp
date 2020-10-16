@@ -121,44 +121,77 @@
 (defmethod norm-expr :identity [x] x)
 (defmethod norm-expr :abnormal [x] (Sum. {(Product. {x 1}) 1})) ;; x^1 × 1
 
+(defn- scale-sum [sum c]
+  (Sum.
+   (persistent!
+    (reduce-kv
+     (fn [a k v]
+       (assoc! a k (* v c)))
+     (transient {})
+     (:terms sum)))))
+
+(def ^:dynamic *max-product-size*
+  "If a program contains a product of more than this many factors an exception will be raised. Computing very large products tends to exhaust the heap, and is usually a mistake"
+  10)
+
 (defmethod norm-expr :*        [[_ & args]]
+  (when (and *max-product-size*
+             (> (count args) *max-product-size*))
+    (throw
+     (ex-info
+      "Product too large - maybe missing a sum? Rebind *max-product-size* if you're sure."
+      {:size (count args)
+       :max-size *max-product-size*})))
   (doall
    (reduce
     (fn [acc val]
-      (cond
-        (or (is-zero? val) (is-zero? acc)) ZERO
-        (is-one? val)  acc
-        (is-one? acc)  val
-        
-        (instance? Sum val)
-        (->> (for [[ka wa] (:terms acc)
-                   [kb wb] (:terms val)
-                   :let [wc (* wa wb)]
-                   :when (not (zero? wc))]
-               [(cond
-                  (= ::c ka) kb
-                  (= ::c kb) ka
+      (let [acc-constant (and (is-constant? acc) (constant-value acc))
+            val-constant (and (is-constant? val) (constant-value val))]
+        (cond
+          (or (and acc-constant (== 0 acc-constant))
+              (and val-constant (== 0 val-constant))) ZERO
+          
+          (and acc-constant (== 1 acc-constant)) val
+          (and val-constant (== 1 val-constant)) acc
+          
+          (and acc-constant val-constant)
+          (* acc-constant val-constant)
 
-                  (and (instance? Product ka)
-                       (instance? Product kb))
-                  (Product. (merge-with + (:factors ka) (:factors kb)))
+          (and acc-constant (instance? Sum val))
+          (scale-sum val acc-constant)
 
-                  :else (throw (ex-info "Can't multiply these" {:a ka :b kb})))
-                wc])
-             ;; now we have the cross product, we need to
-             ;; sum up any duplicates
-             (reduce
-              (fn [acc [term mul]]
-                (if (zero? mul)
-                  acc
-                  (let [term (if (instance? Product term)
-                               (simplify-product term) ;; in case it's now actually just 1
-                               term)]
-                    (assoc acc term (+ mul (get acc term 0))))))
-              {})
-             (Sum.))
-        :else
-        (throw (ex-info "Unable to mul" {:val val}))))
+          (and val-constant (instance? Sum acc))
+          (scale-sum acc val-constant)
+          
+          (instance? Sum val)
+          (->> (for [[ka wa] (:terms acc)
+                     [kb wb] (:terms val)
+                     :let [wc (* wa wb)]
+                     :when (not (zero? wc))]
+                 [(cond
+                    (= ::c ka) kb
+                    (= ::c kb) ka
+
+                    (and (instance? Product ka)
+                         (instance? Product kb))
+                    (Product. (merge-with + (:factors ka) (:factors kb)))
+
+                    :else (throw (ex-info "Can't multiply these" {:a ka :b kb})))
+                  wc])
+               ;; now we have the cross product, we need to
+               ;; sum up any duplicates
+               (reduce
+                (fn [acc [term mul]]
+                  (if (zero? mul)
+                    acc
+                    (let [term (if (instance? Product term)
+                                 (simplify-product term) ;; in case it's now actually just 1
+                                 term)]
+                      (assoc acc term (+ mul (get acc term 0))))))
+                {})
+               (Sum.))
+          :else
+          (throw (ex-info "Unable to mul" {:val val})))))
     ONE
     (norm-exprs args))))
 
@@ -479,18 +512,18 @@
                                                (norm-expr [:and c])
                                                (norm-expr c)
                                                )]
-                                         (when-not
-                                             (or (instance? Constraint result)
-                                                 (instance? Conjunction result))
+                                         (when-not (is-logical? result)
                                            (throw
-                                            (ex-info "Constraint not a constraint"
+                                            (ex-info "Expression in constraints does not have a logic value."
                                                      {:input c
-                                                      :result result})))
+                                                      :result result
+                                                      :class (class c)
+                                                      })))
                                          result
                                          )))
-                        
                         (s/transform [:objective] norm-expr)))
               ]
+
           ;; Convert to normalized program record
           (map->Program lp)))
       (throw (ex-info
