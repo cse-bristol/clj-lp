@@ -234,7 +234,8 @@ quit")
                             statistics)
                     ;; SCIP leaves off the constant term in the objective
                     (update-in [:solution :value]
-                               + constant-term))
+                               (fn [a] (when (and a constant-term)
+                                         (+ a constant-term)))))
                 )
               )
             ]
