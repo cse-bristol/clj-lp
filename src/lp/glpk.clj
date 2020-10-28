@@ -10,12 +10,8 @@
        "l" :bounded-below
        "u" :bounded-above
        "f" :free
-       "s" :fixed}
-
-
-
-
-      ]
+       "s" :fixed}]
+  
   (defn glpsol [text index-to-variable]
     (let [lines (-> text
                     (s/split-lines)
@@ -106,10 +102,6 @@
 
         result (glpsol result-text var-index)]
     (-> (lp/merge-results lp result)
-        ;; (assoc
-        ;;  :state blah
-        ;;  )
-
         )))
 
 

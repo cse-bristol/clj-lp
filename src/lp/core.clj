@@ -5,367 +5,330 @@
             [clojure.spec.alpha :as spec]
             [lp.dsl]))
 
-(def ^:dynamic *lp-vars* {})
-(def ^:dynamic *raw-vars* {})
-
-(defrecord Product [factors]) ;; {:x 2 :y 3} => x² × y³
-(defrecord Sum [terms]) ;; {a 1 b 2} => a + 2b
-(defrecord Program [sense objective vars constraints])
-(defrecord Constraint [body lower upper]) ;; lower <= body <= upper, allowing nil for l and u
-(defrecord Conjunction [body]) ;; AND x y z
-(defrecord Abnormal [fn args]) ;; something which could not be normalized
-
-(def ^:private ^:constant common-operators
-  {+ :+ * :* - :- / :/ < :< > :> = := <= :<= >= :>=})
-
 (defn- singleton? [coll] (and (seq coll) (empty? (rest coll))))
 
-(defn expression-type [expr]
-  (cond
-    (number? expr)    :number
-    
-    (nil? expr)       :boolean
-    (boolean? expr)   :boolean
+(defprotocol ILinear
+  (constant-value [self])
+  (constant? [self])
+  (gradient [self]))
 
-    (instance? Product expr)  :product
-    (instance? Abnormal expr) :abnormal
+(defprotocol ILinearizable
+  (linearize [self]))
 
-    (or (instance? Sum expr)
-        (instance? Constraint expr)
-        (instance? Conjunction expr)) :identity
+(defprotocol ILogical
+  (all-constraints [s]))
 
-    (*lp-vars* expr)  :variable
-    
-    (vector? expr)
-    ;; a grim hack to make using operators more convenient
-    ;; 
-    (get common-operators (first expr) (first expr))
+(defrecord Constraint [body lower upper]
+  ILinearizable
+  (linearize [x] x)
 
-    :else (throw (ex-info "Unknown expression-type" {:expr expr ::c (class expr)}))))
+  ILogical
+  (all-constraints [self]
+    ;; this filters out constraints which are trivial
+    (when (and (or lower upper)
+               (not (and (constant? body)
+                         (let [k (constant-value body)]
+                           (<= (or k lower) k (or k upper))))))
+      [self]))
 
-(def ZERO (Sum. {::c 0.0}))
-(def ONE  (Sum. {::c 1.0}))
+  ILinear
+  (constant-value [_] (constant-value body))
+  (gradient [_] (gradient body))
+  (constant? [_] (constant? body)))
 
-(let [constant-sum?
-      (fn [x]
-        (let [terms (:terms x)]
-          (or (empty? terms)
-              (and (= 1 (count terms)) (contains? terms ::c)))))
-      
-      ]
-  (defn is-constant?
-    ([x]
-     (or (number? x)
-         (and (instance? Sum x)
-              (constant-sum? x))))
-    
-    ([x y]
-     (or (and (number? x) (== y x))
-         (and (instance? Sum x)
-              (constant-sum? x)
-              (== y (::c (:terms x) 0)))))))
-
-(defn is-one?  [x] (is-constant? x 1))
-(defn is-zero? [x] (is-constant? x 0))
-
-(defn simplify-product
-  "Given a product, simplify it by removing any x^0 in it"
-  [p]
-  (if (= ::c p)
-    p
-    (let [factors (remove (comp is-zero? second) (:factors p))]
-      (if (empty? factors)
-        ::c
-        (Product. (into {} factors))))))
-
-(defn is-logical? [x]
-  (or (instance? Constraint x)
-      (instance? Conjunction x)))
-
-(defn constant-value [x]
-  (or
-   (cond
-     (number? x) x
-
-     (instance? Sum x)
-     (-> x :terms (get ::c 0)))
-   0))
-
-(defmulti norm-expr expression-type)
-
-(let [norm-exprs!
-      (fn norm-exprs! [exprs acc]
-        (reduce
-         (fn [acc e]
-           (if (and (seq? e) (not (vector? e)))
-             (norm-exprs! e acc)
-             (conj! acc (norm-expr e))))
-         acc exprs))]
+(defrecord Conjunction [body]
+  ILinearizable
+  (linearize [x] x)
   
-  (defn norm-exprs [exprs]
-    (persistent! (norm-exprs! exprs (transient [])))))
+  ILogical
+  (all-constraints [self]
+    (loop [out (transient [])
+           body body]
+      (if (empty? body) (persistent! out)
+          (let [[b & body] body]
+            (recur (reduce conj! out (all-constraints b)) body))))))
 
-(defmethod norm-expr :number   [x] (Sum. {::c (double x)}))
-(defmethod norm-expr :boolean  [x] (norm-expr (if x 1.0 0.0)))
-(defmethod norm-expr :variable [x]
-  (let [v (get *lp-vars* x)]
+(defrecord Program [sense objective vars constraints]
+  ILogical
+  (all-constraints [_]
+    (loop [out  (transient [])
+           cons (vals constraints)]
+      (if (empty? cons) (persistent! out)
+          (let [[con & cons] cons]
+            (recur
+             (reduce conj! out (all-constraints con))
+             cons)))))
+
+  ILinear
+  (constant-value [_] (constant-value objective))
+  (constant? [_] (constant? objective))
+  (gradient [_] (gradient objective)))
+
+(defrecord Linear [constant parts]
+  ILinearizable
+  (linearize [self] self)
+
+  ILinear
+  (constant-value [self] constant)
+  (constant? [self] (or (empty? parts) (every? zero? (vals parts))))
+  (gradient [self] parts))
+
+(extend-protocol ILinear
+  Number
+  (constant-value [n] n)
+  (constant? [n] true)
+  (gradient [n] {}))
+
+(def ^:dynamic *variables* {})
+
+(defn lp-var [x]
+  (if-let [v (get *variables* x)]
     (if (or (:fixed v)
             (and (:lower v)
                  (:upper v)
                  (== (:lower v) (:upper v))))
-      ;; Constant
-      (norm-expr (:value v (:lower v)))
-      ;; v^1
-      (Sum. {(Product. {x 1}) 1}))))
-(defmethod norm-expr :product  [x] (Sum. {x 1})) 
-(defmethod norm-expr :identity [x] x)
-(defmethod norm-expr :abnormal [x] (Sum. {(Product. {x 1}) 1})) ;; x^1 × 1
+      (linearize (:value v (:lower v)))
+      (Linear. 0 {x 1}))
+    (throw (ex-info "Cannot linearize" {:x x}))))
 
-(defn- scale-sum [sum c]
-  (Sum.
-   (persistent!
-    (reduce-kv
-     (fn [a k v]
-       (assoc! a k (* v c)))
-     (transient {})
-     (:terms sum)))))
+(let [handle
+      (fn handle [args out]
+        (reduce
+         (fn [out arg]
+           (if (and (seq? arg) (not (vector? arg)))
+             (handle arg out)
+             (conj! out (linearize arg))))
+         out args))]
+  (defn linearize-args [vector]
+    (persistent! (handle (rest vector) (transient [])))))
 
-(def ^:dynamic *max-product-size*
-  "If a program contains a product of more than this many factors an exception will be raised. Computing very large products tends to exhaust the heap, and is usually a mistake"
-  10)
+(defn- sprod [constant grad]
+  (if (empty? grad)
+    constant
+    (Linear. constant grad)))
 
-(defmethod norm-expr :*        [[_ & args]]
-  (when (and *max-product-size*
-             (> (count args) *max-product-size*))
-    (throw
-     (ex-info
-      "Product too large - maybe missing a sum? Rebind *max-product-size* if you're sure."
-      {:size (count args)
-       :max-size *max-product-size*})))
-  (doall
-   (reduce
-    (fn [acc val]
-      (let [acc-constant (and (is-constant? acc) (constant-value acc))
-            val-constant (and (is-constant? val) (constant-value val))]
-        (cond
-          (or (and acc-constant (== 0 acc-constant))
-              (and val-constant (== 0 val-constant))) ZERO
-          
-          (and acc-constant (== 1 acc-constant)) val
-          (and val-constant (== 1 val-constant)) acc
-          
-          (and acc-constant val-constant)
-          (* acc-constant val-constant)
+(defn sum [xs]
+  (loop [xs     xs
+         constant 0
+         grad (transient {})]
+    (if (empty? xs)
+      (sprod constant (persistent! grad))
+      (let [[x & xs] xs]
+        (recur xs
+               (+ constant (constant-value x))
+               (if (constant? x)
+                 grad
+                 (reduce-kv
+                  (fn [out x k]
+                    (let [k' (+ k (get out x 0))]
+                      (if (zero? k')
+                        (dissoc! out x)
+                        (assoc! out x k'))))
+                  grad
+                  (gradient x))
+                 ))))))
 
-          (and acc-constant (instance? Sum val))
-          (scale-sum val acc-constant)
-
-          (and val-constant (instance? Sum acc))
-          (scale-sum acc val-constant)
-          
-          (instance? Sum val)
-          (->> (for [[ka wa] (:terms acc)
-                     [kb wb] (:terms val)
-                     :let [wc (* wa wb)]
-                     :when (not (zero? wc))]
-                 [(cond
-                    (= ::c ka) kb
-                    (= ::c kb) ka
-
-                    (and (instance? Product ka)
-                         (instance? Product kb))
-                    (Product. (merge-with + (:factors ka) (:factors kb)))
-
-                    :else (throw (ex-info "Can't multiply these" {:a ka :b kb})))
-                  wc])
-               ;; now we have the cross product, we need to
-               ;; sum up any duplicates
-               (reduce
-                (fn [acc [term mul]]
-                  (if (zero? mul)
-                    acc
-                    (let [term (if (instance? Product term)
-                                 (simplify-product term) ;; in case it's now actually just 1
-                                 term)]
-                      (assoc acc term (+ mul (get acc term 0))))))
-                {})
-               (Sum.))
-          :else
-          (throw (ex-info "Unable to mul" {:val val})))))
-    ONE
-    (norm-exprs args))))
-
-(defmethod norm-expr :+        [[_ & args]]
-  (doall
-   (reduce
-    (fn [acc val]
-      (cond
-        (is-zero? val) acc
-        (is-zero? acc) val
-
-        (instance? Sum val)
-        (Sum. (->> (merge-with + (:terms acc) (:terms val))
-                   (filter (comp not zero? second))
-                   (into {})))
-
-        :else (throw (ex-info "Unable to add" {:val val}))))
-    ZERO
-    (norm-exprs args))))
-
-(defmethod norm-expr :-        [[_ & args]]
-  (let [[f & r] (norm-exprs args)]
-    (cond
-      (seq r)
-      (norm-expr [:+ f [:- `[:+ ~@r]]])
-
-      (and f (instance? Sum f))
-      (->> (doall
-            (for [[k w] (:terms f)
-                  :when (not (zero? w))]
-              [k (- w)]))
-           (into {})
-           (Sum.))
-
-      (and (not f) (not r))
-      ZERO
-
-      :else (throw (ex-info "Unable to negate" {:f f :r r}))
-      )))
-
-(defmethod norm-expr :/        [[_ n d & args]]
-  (when-not (empty? args) (throw (ex-info "/ only works with 2 arguments")))
-  (let [n (norm-expr n)
-        d (norm-expr d)]
-    (cond
-      (and (is-zero? n) (is-zero? d))
-      (norm-expr ##NaN)
-      
-      (is-zero? d)
-      (norm-expr ##Inf)
-      
-      (= n d) (norm-expr 1)
-      
-      (is-constant? d)
-      (norm-expr [:* n (/ 1.0 (constant-value d))])
-
-      ;; here we could do x/x => 1
-      
-      :else (throw (ex-info "Nonlinear division not implemented, sorry"))))
+(let [grad*
+      (fn [grad k]
+        ;; grad can't usefully be transient because we need its keys
+        (persistent!
+         (reduce-kv
+          (fn [a x k1]
+            (let [k' (* k1 k)]
+              (if (zero? k')
+                (dissoc! a x)
+                (assoc! a x k'))))
+          (transient {})
+          grad)))]
   
-  ;; / doesn't distribute over +, so we can't do much here
-  ;; special cases we can handle are
-  ;; constant / constant
-  ;; sumexpr / constant
-  ;; constant / product
-  ;; product / product
-  ;; anything else has to become Abnormal
+  (defn product [xs]
+    (loop [xs       xs
+           constant 1
+           grad     {}]
+      (if (empty? xs)
+        (sprod constant grad) ;; uck
+        (let [[x & xs] xs]
+          (cond
+            (constant? x)
+            (let [k (constant-value x)]
+              (recur
+               xs
+               (* constant k)
+               (grad* grad k)))
+
+            (empty? grad)
+            (recur xs
+                   (* constant (constant-value x))
+                   (grad* (gradient x) constant))
+            
+            :else
+            (throw (ex-info "Nonlinear product" {:grad grad
+                                                 :constant constant
+                                                 :x x}
+                            ))))))))
+
+(defn divide [vals]
+  (if (= 1 (bounded-count 2 vals))
+    ;; it's 1/x which we can do if x is constant
+    (let [val (first vals)]
+      (if (constant? val)
+        (Linear. (/ (constant-value val)) {})
+        (throw (ex-info "Cannot take the reciprocal of a variable" {:variable val}))))
+
+    ;; it's (first / (product rest))
+    (let [[h & t] vals
+          tprod   (product t)]
+      (if (constant? tprod)
+        (let [k (constant-value tprod)]
+          (Linear.
+           (/ (constant-value h) k)
+           (persistent!
+            (reduce-kv
+             (fn [a x v] (assoc! a x (/ v k)))
+             (transient {})
+             (gradient h)))))
+        (throw (ex-info "Cannot divide by a variable" {:variable tprod})))))
+  
+  ;; x/k  ~> (1/k) x
+  ;; k1/k ~> k2
+  ;; x/x ~> 1
+
+  ;; in principle we could express k^-1 as a term, in case later we *k
   )
 
-(defmethod norm-expr :>=       [[_ & args]]
-  (norm-expr `[:<= ~@(reverse args)]))
+(defn sub [xs]
+  (if (= 1 (bounded-count 2 xs))
+    (let [x (first xs)]
+      (Linear.
+       (- (constant-value x))
+       (persistent!
+        (reduce-kv
+         (fn [a k v] (assoc! a k (- v)))
+         (transient {})
+         (gradient x)))))
 
-(defmethod norm-expr :<=       [[_ & args]]
-  (let [args (norm-exprs args)]
-    (cond
-      (= 2 (count args))
-      ;; so here we have a <= b
-      ;; so a - b <= 0
-      ;; blah + k <= 0
-      ;; blah <= -k
-      ;; blah >= k
-      ;; TODO this could be nicer.
-      (let [delta (norm-expr `[:- ~@args])
-            k (constant-value delta)
-            delta (norm-expr `[:- ~delta ~k])
-            ]
-        (Constraint. delta nil (- k)))
-      
-      (= 3 (count args))
-      (let [[lb mid ub] args]
-        (cond
-          (and (is-constant? lb)
-               (is-constant? ub))
-          (let [constant-term (constant-value mid)]
-            (Constraint. (norm-expr `[:- ~mid ~constant-term])
-                         (- (constant-value lb) constant-term)
-                         (- (constant-value ub) constant-term)))
-          
-          :else
-          (norm-expr `[:and
-                       [:<= ~lb ~mid]
-                       [:<= ~mid ~ub]])))
+    (loop [constant (constant-value (first xs))
+           grad      (transient (gradient (first xs)))
+           xs       (rest xs)]
+      (if (empty? xs)
+        (sprod constant (persistent! grad))
+        (let [[x & xs] xs]
+          (recur
+           (- constant (constant-value x))
+           (reduce-kv
+            (fn [out x k]
+              (let [k' (- (get out x 0) k)]
+                (if (zero? k')
+                  (dissoc! out x)
+                  (assoc! out x k'))))
+            grad (gradient x))
+           xs))))))
 
-      :else (throw (ex-info "Constraints can only be < x y or < l x u"))
-      )))
+;; these are for logical expressions, which are a bit different
 
-(defmethod norm-expr :and      [[_ & args]]
-  ;; several constraints which are all true
-  (let [args (norm-exprs args)]
+(defn logand [vals]
+  (if (= 1 (bounded-count 2 vals))
+    (first vals)
     (Conjunction.
-     (persistent!
-      (reduce
-       (fn [acc arg]
-         (cond
-           (instance? Constraint arg)
-           (conj! acc arg)
+     (loop [out (transient [])
+            vals vals]
+       (if (empty? vals) (persistent! out)
+           (let [[x & vals] vals]
+             (cond
+               (instance? Constraint x)
+               (recur (conj! out x) vals)
 
-           ;; fold up other conjunctions
-           (instance? Conjunction arg)
-           (reduce conj! acc (:body arg))
+               (instance? Conjunction x)
+               (recur (reduce conj! out (:body x)) vals)
 
-           (nil? arg)
-           acc
+               :else (throw (ex-info "Non-logical argument given to :and" {:argument x})))))))))
 
-           :else
-           (throw (ex-info "Non-logical argument to :and" {:arg arg}))
-           ))
-       (transient [])
-       args)))))
+(defn eql [vals]
+  (linearize
+   (into [:and]
+         (for [[a b] (partition-all 2 1 vals) :when (and a b)]
+           (let [d (sub [a b])
+                 k (constant-value d)
+                 e (sub [d k])]
+             (Constraint. e (- k) (- k)))))))
 
-;; (defmethod norm-expr :and      [[_ & args]]
-;;   ;; several constraints which are all true
-;;   (p :norm-and
-;;      (let [args (norm-exprs args)]
-;;        (Conjunction.
-;;         (reduce
-;;          (fn [acc arg]
-;;            (cond
-;;              (instance? Constraint arg)
-;;              (conj acc arg)
+(defn less [vals]
+  (case (count vals)
+    2 (let [delta (sub vals)
+            k (constant-value delta)
+            body (sub [delta k])]
+        (Constraint. body nil (- k)))
+    3 (let [[lb mid ub] vals]
+        (if (and (constant? lb)
+                 (constant? ub))
+          (let [k (constant-value mid)]
+            (Constraint. (sub [mid k])
+                         (- (constant-value lb) k)
+                         (- (constant-value ub) k)))
 
-;;              ;; fold up other conjunctions
-;;              (instance? Conjunction arg)
-;;              (into acc (:body arg))
+          (linearize [:and [:<= lb mid] [:<= mid ub]])))
 
-;;              (nil? arg)
-;;              acc
+    (linearize
+     (into [:and]
+           (for [[l g] (partition-all 2 1 vals) :when (and l g)]
+             [:<= l g])))))
 
-;;              :else
-;;              (throw (ex-info "Non-logical argument to :and" {:arg arg}))
-;;              ))
-;;          []
-;;          args)))))
+(defn more [vals] (less (reverse vals)))
 
+(extend-protocol ILinearizable
+  Number
+  (linearize [x] x)
 
-(defmethod norm-expr ::lower [[_ v]]
-  (norm-expr (:lower (get *lp-vars* v) (- Double/MAX_VALUE))))
+  clojure.lang.IPersistentVector
+  (linearize [x]
+    (if (contains? *variables* x)
+      (lp-var x)
+      
+      (let [f (nth x 0)
+            f (cond
+                (= + f) :+
+                (= * f) :*
+                (= / f) :/
+                (= - f) :-
+                (= = f) :=
+                (= <= f) :<=
+                (= >= f) :>=
+                true f)]
+        (case f
+          :* (product (linearize-args x))
+          :+ (sum (linearize-args x))
+          :/ (divide (linearize-args x))
+          :- (sub (linearize-args x))
+          := (eql (linearize-args x))
+          :<= (less (linearize-args x))
+          :>= (more (linearize-args x))
+          :and (logand (linearize-args x))
+          (:lp.core/upper
+           ::upper) (if-let [v (get *variables* (nth x 1))]
+                    (linearize (:upper v Double/POSITIVE_INFINITY))
+                    (throw (ex-info "Upper bound for unknown variable" {:expression x})))
+          (:lp.core/lower
+           ::lower) (if-let [v (get *variables* (nth x 1))]
+                    (linearize (:lower v Double/NEGATIVE_INFINITY))
+                    (throw (ex-info "Upper bound for unknown variable" {:expression x})))
+          (:lp.core/<M
+           ::<M) ;; x <= x_on * M
+          (linearize [:<=
+                      (nth x 1)
+                      [* (nth x 2) [::upper (nth x 1)]]])
+          
+          (lp-var x)
+          ))))
 
-(defmethod norm-expr ::upper [[_ v]]
-  (norm-expr (:upper (get *lp-vars* v) Double/MAX_VALUE)))
+  Object
+  (linearize [x] (lp-var x))
 
-(defmethod norm-expr :=        [[_ & args]]
-  ;; for our two expressions to be equal, they must sum to zero
-  (let [expr (norm-expr `[:- ~@args])
-        k (constant-value expr) ;; extract constant term
-        expr (norm-expr `[:- ~expr ~k]) ;; a bit lazy, but take it off.
-        ]
-    (Constraint. expr (- k) (- k))))
+  nil
+  (linearize [x] (linearize false))
 
-(defmethod norm-expr :default  [e]
-  (throw
-   (if-let [possible-var (get *raw-vars* (first e))]
-     (ex-info "Index outside range for variable" {:variable (first e) :index (rest e)})
-     (ex-info "Unsupported operator in expression, or undefined variable" {:expression e}))))
+  Boolean
+  (linearize [x] (if x 1 0)))
+
 
 (let [as-fn-n (fn [x]
                 (cond
@@ -452,6 +415,7 @@
          (assoc vars k v)))
      {} vars)))
 
+
 (defn add-bounds [var]
   (try (cond-> var
          (= (:type var) :non-negative)
@@ -462,6 +426,7 @@
        (catch Exception e
          (throw (ex-info "Adding bounds to var" {:var var} e))
          )))
+
 
 (defn normalize
   "Given `lp`, return a normalized form of it, unless already done.
@@ -475,87 +440,62 @@
   (if (instance? Program lp)
     lp
     (if (spec/valid? :lp/program lp)
-      (binding [*raw-vars* (:vars lp)]
-        (let [tidy-constraints
-              #(if (map? %) %
-                   (into {} (map-indexed vector %)))
-              
-              {obj :objective min :minimize max :maximize
-               subject-to :subject-to
-               constraints :constraints}
-              lp
+      (let [tidy-constraints
+            #(if (map? %) %
+                 (into {} (map-indexed vector %)))
+            
+            {obj :objective min :minimize max :maximize
+             subject-to :subject-to
+             constraints :constraints}
+            lp
 
-              lp (cond->
-                     lp (not obj)
-                     (cond-> 
-                         min (-> (assoc :sense :minimize :objective min)
-                                 (dissoc :minimize))
-                         max (-> (assoc :sense :maximize :objective max)
-                                 (dissoc :maximize))
-                         constraints (update :constraints tidy-constraints)
-                         subject-to  (-> (update :constraints merge
-                                                 (tidy-constraints subject-to))
-                                         (dissoc :subject-to))
-                         ))
+            lp (cond->
+                   lp (not obj)
+                   (cond-> 
+                       min (-> (assoc :sense :minimize :objective min)
+                               (dissoc :minimize))
+                       max (-> (assoc :sense :maximize :objective max)
+                               (dissoc :maximize))
+                       constraints (update :constraints tidy-constraints)
+                       subject-to  (-> (update :constraints merge
+                                               (tidy-constraints subject-to))
+                                       (dissoc :subject-to))
+                       ))
 
-              lp (-> lp
-                     (update :vars expand-indices)
-                     (->> (s/transform [:vars s/MAP-VALS] add-bounds)))
+            lp (-> lp
+                   (update :vars expand-indices)
+                   (->> (s/transform [:vars s/MAP-VALS] add-bounds)))
 
-              lp (binding [*lp-vars* (:vars lp)]
-                   (->> lp
-                        (s/setval [:constraints s/MAP-VALS nil?] s/NONE)
-                        (s/transform [:constraints s/MAP-VALS]
-                                     (fn [c]
-                                       (let [result
-                                             (if (and (seq? c) (not (vector? c)))
-                                               (norm-expr [:and c])
-                                               (norm-expr c)
-                                               )]
-                                         (when-not (is-logical? result)
-                                           (throw
-                                            (ex-info "Expression in constraints does not have a logic value."
-                                                     {:input c
-                                                      :result result
-                                                      :class (class c)
-                                                      })))
-                                         result
-                                         )))
-                        (s/transform [:objective] norm-expr)))
-              ]
+            lp (binding [*variables* (:vars lp)]
+                 (->> lp
+                      (s/setval [:constraints s/MAP-VALS nil?] s/NONE)
+                      (s/transform
+                       [:constraints s/MAP-VALS]
+                       (fn [c]
+                         (let [result
+                               (if (and (seq? c) (not (vector? c)))
+                                 (linearize [:and c])
+                                 (linearize c))]
+                           
+                           ;; (when-not (is-logical? result)
+                           ;;   (throw
+                           ;;    (ex-info "Expression in constraints does not have a logic value."
+                           ;;             {:input c
+                           ;;              :result result
+                           ;;              :class (class c)
+                           ;;              })))
 
-          ;; Convert to normalized program record
-          (map->Program lp)))
+                           result
+                           )))
+                      (s/transform [:objective] linearize)))
+            ]
+
+        ;; Convert to normalized program record
+        (map->Program lp))
       (throw (ex-info
               "Invalid linear program"
               {:explain-data (spec/explain-data :lp/program lp)
                :explain-message (spec/explain-str :lp/program lp)})))))
-
-(defmulti linear? class)
-
-(defmethod linear? Number [x] true)
-(defmethod linear? clojure.lang.Keyword [c] (= c ::c))
-
-(defmethod linear? Sum [x] (every? linear? (keys (:terms x))))
-(defmethod linear? Product [x] ;; TODO special case for single variable?
-  (let [by-exponent (group-by (comp double second) (:factors x))
-        exponents (conj (set (keys by-exponent))
-                        1.0 0.0)]
-
-    (and (= exponents #{1.0 0.0})
-         (< (count (get by-exponent 1.0)) 2))))
-
-(defmethod linear? Conjunction [x]
-  (every? linear? (:body x)))
-
-(defmethod linear? Constraint [x]
-  (linear? (:body x)))
-
-(defmethod linear? Program [x]
-  (and (linear? (:objective x))
-       (every? linear? (vals (:constraints x)))))
-
-(defmethod linear? :default [_] false)
 
 (defn collapse-indices
   "Output vars have had their indices blown up, whereas input vars
@@ -607,6 +547,7 @@
          (assoc vars k v)))
      {} output-vars)))
 
+
 (defn fix-var-types [vars]
   (->> vars
        (s/transform
@@ -640,81 +581,18 @@
                         (merge-with merge %1 %2)) result-vars)
         (assoc :solution (:solution result)))))
 
-(defn constraint-bodies
-  "Given a normalized LP, get all the constraint bodies, ignoring their names.
-  Why do we have names?"
-  [lp]
-  (reduce
-   (fn [a c]
-     (cond
-       (instance? Constraint c)
-       (conj a c)
+(defn gradient-double
+  "Gets the gradient of x, taking the coefficients as doubles"
+  [x]
+  (let [g (gradient x)]
+    (persistent!
+     (reduce-kv
+      (fn [a k v]
+        (assoc! a k (double v)))
+      (transient {})
+      g))))
 
-       (instance? Conjunction c)
-       (into a (:body c))
-
-       (nil? c)
-       a
-       
-       :else
-       (throw (ex-info "Unexpected non-constraint object in constraint list!"
-                       {:value c
-                        :meta (meta c)
-                        }
-                       ))
-       ))
-   []
-   (vals (:constraints lp))))
-
-(defn nontrivial-constraint-bodies
-  "Like `constraint-bodies`, with trivial constraints removed"
-  [lp]
-  (remove
-   (fn [{:keys [body lower upper]}]
-     (or (and (nil? lower) (nil? upper)) (is-constant? body)))
-   (constraint-bodies lp)))
-
-(defn linear-variable [p]
-  (if (= p ::c) p
-      (first (keys (:factors p)))))
-
-(defmulti linear-coefficients class)
-(defmethod linear-coefficients Sum [sum]
-  (reduce
-   (fn [acc [term weight]]
-     (if (and (linear? term) (not (zero? weight)))
-       (let [term (simplify-product term)
-             x    (linear-variable term)]
-         (assoc acc x (+ weight (get acc x 0))))))
-   {} (:terms sum)))
-
-(defmethod linear-coefficients Constraint [c]
-  (linear-coefficients (:body c)))
-
-(defn trivial-checks
-  "Given a normalized LP, do some trivial checks to make sure it's OK"
-  [lp]
-
-  (let [invalid-vars
-        (keep
-         (fn [[v {lb :lower ub :upper}]]
-           (cond
-             (not (and lb ub)) [v "Missing lower or upper bound" lb ub]
-             (not (<= lb ub))  [v "Impossible bounds" lb ub]))
-         (:vars lp))
-
-        invalid-cons
-        (keep
-         (fn [{b :body l :lower u :upper}]
-           (let [cv (and (is-constant? b) (constant-value b))]
-             (when (or (and l u (> l u))
-                       (and cv
-                            (and l (> l cv))
-                            (and u (< u cv))))
-               ["A constraint has impossible bounds" l b u])))
-         (constraint-bodies lp))
-
-        problems (concat invalid-vars invalid-cons)
-        ]
-    problems))
-
+(defn constant-double
+  "Gets the constant part of x, as a double"
+  [x]
+  (double (constant-value x)))

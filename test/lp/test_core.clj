@@ -1,14 +1,14 @@
 (ns lp.test-core
-  (:require [lp.core :as sut]
+  (:require [lp.core2 :as sut]
             [clojure.test :as t]
             [lp.core :as lp]))
 
 (t/deftest constant-folding
   (let [has-value
         (fn [value expr]
-          (let [expr (sut/norm-expr expr)]
-            (t/is (sut/is-constant? expr))
-            (t/is (== value (sut/constant-value expr)))))]
+          (let [expr (sut/linearize expr)]
+            (t/is (sut/constant? expr))
+            (t/is (== value (sut/constant-double expr)))))]
 
     (has-value 0 0)
     (has-value 1 1)
@@ -28,7 +28,7 @@
     (has-value 1 [:/ [:- 1] -1])
     (has-value 0.5 [:/ 1 2])
 
-    (binding [sut/*lp-vars* {:a {:value 10 :fixed true}}]
+    (binding [sut/*variables* {:a {:value 10 :fixed true}}]
       (has-value 10 :a)
       (has-value 20 [:* 2 :a])
       (has-value 0 [:- :a :a])
@@ -36,33 +36,17 @@
     
     ))
 
-(t/deftest linear-expressions
-  (let [linear (fn [expr] (sut/linear? (sut/norm-expr expr)))]
-    (binding [sut/*lp-vars* {:a {} :b {}}]
-      (t/is (linear :a))
-      (t/is (linear 0))
-      (t/is (not (linear [:* :a :a])))
-      (t/is (linear [:+ :a :b]))
-      (t/is (not (linear [:* :a :b])))
-      (binding [sut/*lp-vars* {:a {} :b {:value 0 :fixed true}}]
-        (t/is (linear (sut/norm-expr [:* :a :b])))
-        (t/is (sut/is-constant? (sut/norm-expr [:* :a :b]))))
-      (binding [sut/*lp-vars* {:a {} :b {:value 1 :fixed true}}]
-        (t/is (linear (sut/norm-expr [:* :a :b])))
-        (t/is (not (sut/is-constant? (sut/norm-expr [:* :a :b])))))
-      )))
-
 (t/deftest gradients
   (let [p {:minimize [:+ [:* 3 :x] [:* 2 :y] 9]
            :vars {:x {} :y {}}}
         p (sut/normalize p)
-        g (sut/linear-coefficients (:objective p))
+        g (sut/gradient-double p)
         ]
     (t/is
      (= (set (keys g))
-        #{:y :x ::sut/c}))
+        #{:y :x}))
 
-    (t/is (== 9 (::sut/c g)))
+    (t/is (== 9 (sut/constant-double p)))
     (t/is (== 2 (:y g)))
     (t/is (== 3 (:x g)))
     ))
@@ -74,22 +58,22 @@
            :subject-to (list [:<= :x [:+ :y 33]])
            :vars {:x {} :y {}}}
         p (sut/normalize p)
-        c (first (sut/constraint-bodies p))
+        c (first (sut/all-constraints p))
         ]
-    (t/is (instance? lp.core.Constraint c))
-    (t/is (zero? (sut/constant-value (:body c))))
+    (t/is (instance? lp.core2.Constraint c))
+    (t/is (zero? (sut/constant-double (:body c))))
     ;; this should either be
     ;; x - y <= 33
     ;; or y - x >= -33
 
     (t/is (or (and (== 33 (:upper c))
-                   (== 1 (:x (sut/linear-coefficients c)))
-                   (== -1 (:y (sut/linear-coefficients c)))
+                   (== 1 (:x (sut/gradient-double c)))
+                   (== -1 (:y (sut/gradient-double c)))
                    )
 
               (and (== -33 (:lower c))
-                   (== -1 (:x (sut/linear-coefficients c)))
-                   (== 1 (:y (sut/linear-coefficients c)))
+                   (== -1 (:x (sut/gradient-double c)))
+                   (== 1 (:y (sut/gradient-double c)))
                    )))))
 
 (t/deftest variable-shorthands
@@ -192,7 +176,7 @@
         ]
     (t/is (== 6 (sut/constant-value o)))))
 
-(t/deftest fixed-indexed-values
+#_ (t/deftest fixed-indexed-values
   (let [is #{:a :b}
         js #{:x :y}
         lp {:vars {:x {:type :integer :indexed-by [is js]

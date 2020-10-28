@@ -44,7 +44,7 @@
   "
   [lp & {:keys [comments]}]
   (let [lp         (lp/normalize lp)
-        _          (assert (lp/linear? lp) "Only linear programs for cplex")
+
         free-vars  (into {} (filter (comp not :fixed second) (:vars lp)))
         var-order  (map-indexed
                     (fn [i v]
@@ -57,10 +57,9 @@
 
         print-sum
         (fn [sum & {:keys [constant-value new-lines]}]
-          (let [grad (lp/linear-coefficients sum)]
+          (let [grad (lp/gradient-double sum)]
             (doseq [[x k] grad]
-              (when-not (or (lp/is-zero? k)
-                            (and (= :lp.core/c x)))
+              (when-not (zero? k)
                 (if (>= k 0)
                   (print "+ ")
                   (print "- "))
@@ -71,14 +70,13 @@
                 
                 (let [i (get var-index x)]
                   (when-not i
-                    (throw (ex-info "A variable has appeared in an expression which was not in the variable list"
-                                    {:variable x})))
+                    (throw (ex-info "A variable has appeared in an expression which was not in the variable list" {:variable x})))
                   (print i)))
               (when new-lines
                 (print "\n    ")))
             
             (when constant-value
-                (let [c (:lp.core/c grad 0)]
+                (let [c (lp/constant-double sum)]
                   (when-not (zero? c)
                     (if (>= c 0)
                       (print "+ ")
@@ -88,9 +86,7 @@
 
     {:index-to-var var-rindex
      :var-to-index var-index
-     :constant-term
-     (let [grad (lp/linear-coefficients (:objective lp))]
-       (:lp.core/c grad 0))
+     :constant-term (lp/constant-double (:objective lp))
      
      :program
      (with-out-str
@@ -98,14 +94,14 @@
        (print-sum (:objective lp) :constant-value true :new-lines true)
 
        ;; constraints
-       (when-let [cons (seq (lp/nontrivial-constraint-bodies lp))]
+       (when-let [cons (seq (lp/all-constraints lp))]
          (println)
          (println)
          (println "subject to")
          (doseq [[index constraint] (map-indexed vector cons)]
            (let [{body :body ub :upper lb :lower} constraint
                  
-                 constant-term (or (lp/constant-value body) 0)
+                 constant-term (or (lp/constant-double body) 0)
                  lb (and lb (- lb constant-term))
                  ub (and ub (- ub constant-term))
                  ]
@@ -184,7 +180,6 @@
   [lp]
   ;; precondition - lp is linear?
   (let [lp (lp/normalize lp)
-        _ (assert (lp/linear? lp) "NL output only for linear programs")
 
         var-order
         (vec
@@ -204,7 +199,7 @@
         {n-binary-vars :binary n-integer-vars :integer}
         (frequencies (map (comp :type second) var-order))
 
-        constraints (lp/nontrivial-constraint-bodies lp)
+        constraints (lp/all-constraints lp)
         
         n-constraints       (count constraints)
         n-objectives        1
@@ -214,14 +209,14 @@
         n-linear-constraints n-constraints
 
         count-variables
-        (fn [x] (count (dissoc (lp/linear-coefficients x) ::lp/c)))
+        (fn [x] (count (lp/gradient-double x)))
         
         nz-jacobians  (reduce + 0 (for [c constraints] (count-variables (:body c))))
         gradients     (count-variables (:objective lp))
         
         print-gradient
         (fn [x]
-          (let [gradient (lp/linear-coefficients x)]
+          (let [gradient (lp/gradient-double x)]
             (doseq [[x k] gradient]
               (when-let [i (var-to-index x)]
                 (println i k)))))
@@ -251,11 +246,7 @@
         count-constraints
         (fn [var-name]
           (count (filter
-                  (fn [{body :body}]
-                    (and (instance? lp.core.Sum body)
-                         (some (fn [x]
-                                 (not (zero? (get (:factors x) var-name 0))))
-                               (keys (:terms body)))))
+                  (fn [{body :body}] (contains? (lp/gradient-double body) var-name))
                   constraints)))
         ]
     
@@ -263,8 +254,8 @@
      :var-to-index var-to-index
      :evaluator
      (let [obj (:objective lp)
-           C (lp/constant-value obj)
-           G (dissoc (lp/linear-coefficients obj) :lp.core/c)]
+           C (lp/constant-double obj)
+           G (lp/gradient-double obj)]
        (if (empty? G)
          (constantly C)
          (fn [vars]
@@ -312,14 +303,14 @@
        (doindexed [i constraint constraints]
          (printf "C%d\n" i)
          ;; TODO I think this below is wrong, but not a problem
-         (printf "n%s\n" (lp/constant-value (:body constraint)))
+         (printf "n%s\n" (lp/constant-double (:body constraint)))
          )
 
        ;; objective sense
        (printf "O0 %d\n" (if (= :maximize (:sense lp)) 1 0))
 
        ;; objective body
-       (printf "n%s\n" (lp/constant-value (:objective lp)))
+       (printf "n%s\n" (lp/constant-double (:objective lp)))
 
        ;; dual and primal values for variables
        ;; x2
