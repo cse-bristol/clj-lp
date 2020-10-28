@@ -303,16 +303,13 @@
           :<= (less (linearize-args x))
           :>= (more (linearize-args x))
           :and (logand (linearize-args x))
-          (:lp.core/upper
-           ::upper) (if-let [v (get *variables* (nth x 1))]
+          ::upper (if-let [v (get *variables* (nth x 1))]
                     (linearize (:upper v Double/POSITIVE_INFINITY))
                     (throw (ex-info "Upper bound for unknown variable" {:expression x})))
-          (:lp.core/lower
-           ::lower) (if-let [v (get *variables* (nth x 1))]
+          ::lower (if-let [v (get *variables* (nth x 1))]
                     (linearize (:lower v Double/NEGATIVE_INFINITY))
                     (throw (ex-info "Upper bound for unknown variable" {:expression x})))
-          (:lp.core/<M
-           ::<M) ;; x <= x_on * M
+          ::<M ;; x <= x_on * M
           (linearize [:<=
                       (nth x 1)
                       [* (nth x 2) [::upper (nth x 1)]]])
