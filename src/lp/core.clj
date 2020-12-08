@@ -98,9 +98,30 @@
            (if (and (seq? arg) (not (vector? arg)))
              (handle arg out)
              (conj! out (linearize arg))))
-         out args))]
+         out args))
+
+      handle-nn
+      (fn handle-nn [args out]
+        (reduce
+         (fn [out arg]
+           (cond
+             (and (seq? arg) (not (vector? arg)))
+             (handle-nn arg out)
+
+             (not (nil? arg))
+             (conj! out (linearize arg))
+
+             :else
+             out))
+         
+         out args))
+      ]
   (defn linearize-args [vector]
-    (persistent! (handle (rest vector) (transient [])))))
+    (persistent! (handle (rest vector) (transient []))))
+
+  (defn linearize-non-nil-args [vector]
+    (persistent! (handle-nn (rest vector) (transient []))))
+  )
 
 (defn- sprod [constant grad]
   (if (empty? grad)
@@ -226,12 +247,12 @@
 
 ;; these are for logical expressions, which are a bit different
 
-(defn logand [vals]
-  (if (= 1 (bounded-count 2 vals))
-    (first vals)
+(defn logand [vals-in]
+  (if (= 1 (bounded-count 2 vals-in))
+    (first vals-in)
     (Conjunction.
      (loop [out (transient [])
-            vals vals]
+            vals vals-in]
        (if (empty? vals) (persistent! out)
            (let [[x & vals] vals]
              (cond
@@ -241,7 +262,9 @@
                (instance? Conjunction x)
                (recur (reduce conj! out (:body x)) vals)
 
-               :else (throw (ex-info "Non-logical argument given to :and" {:argument x})))))))))
+               :else (throw (ex-info "Non-logical argument given to :and" {:argument x
+                                                                           :arguments vals-in
+                                                                           })))))))))
 
 (defn eql [vals]
   (linearize
@@ -302,7 +325,7 @@
           := (eql (linearize-args x))
           :<= (less (linearize-args x))
           :>= (more (linearize-args x))
-          :and (logand (linearize-args x))
+          :and (logand (linearize-non-nil-args x))
           ::upper (if-let [v (get *variables* (nth x 1))]
                     (linearize (:upper v Double/POSITIVE_INFINITY))
                     (throw (ex-info "Upper bound for unknown variable" {:expression x})))
