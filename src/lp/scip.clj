@@ -173,7 +173,7 @@
                                                  e)))
                                        
                                        )
-                            x     (get var-index x)]
+                            x     (get var-index x x)]
                         [x {:value v}])))
               })))
        (catch Exception e
@@ -241,3 +241,50 @@ quit")
             ]
         (lp/merge-results lp solution)))))
 
+(defn minuc
+  "Solves the min unsatisfied constraints version of lp.
+  Useful for diagnoising why your program is infeasible."
+  [lp & {:keys [scip]
+                   :or {scip "scip"}
+                   :as settings}]
+
+  (let [{problem-text :program var-index :index-to-var normed-lp :lp}
+        (lpio/cplex lp)]
+    (lpio/with-temp-dir temp
+      (spit (io/file temp "problem.lp") problem-text)
+      (spit (io/file temp "scip.set") (format-settings (dissoc settings :scip)))
+      (spit (io/file temp "commands.txt")
+            "read problem.lp
+change minuc
+optimize
+set write printzeros false
+write solution solution.txt
+write statistics statistics.txt
+quit")
+      (let [{:keys [exit out err]}
+            (sh/sh scip "-s" "scip.set" "-b" "commands.txt" :dir temp)
+
+            output-file (io/file temp "solution.txt")
+            stats-file  (io/file temp "statistics.txt")
+            
+            log (s/join "--\n" [out err])
+            cons (vec (:constraints normed-lp))
+            ]
+        (cond
+              (not (zero? exit))
+              (throw (ex-info "Unable to find minuc solution" {:exit exit}))
+
+              (not (.exists output-file))
+              (throw (ex-info "Unable to find minuc solution - no output" {:exit exit}))
+              
+              :else
+              (let [outputs (parse-output-file output-file var-index)
+                    statistics (parse-statistics-file stats-file)
+                    vars (:vars outputs)
+                    vars (reduce dissoc vars (keys (:vars normed-lp)))
+                    ]
+                
+                (for [^String var-name (keys vars)]
+                  (let [n (.substring var-name 1 (.indexOf var-name "_" 1))
+                        n (Integer/parseInt n)]
+                    (-> (nth cons n) (meta) :lp/input)))))))))

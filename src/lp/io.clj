@@ -87,6 +87,7 @@
     {:index-to-var var-rindex
      :var-to-index var-index
      :constant-term (lp/constant-double (:objective lp))
+     :lp lp
      
      :program
      (with-out-str

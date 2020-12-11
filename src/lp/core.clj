@@ -52,7 +52,7 @@
   ILogical
   (all-constraints [_]
     (loop [out  (transient [])
-           cons (vals constraints)]
+           cons constraints]
       (if (empty? cons) (persistent! out)
           (let [[con & cons] cons]
             (recur
@@ -460,9 +460,13 @@
   (if (instance? Program lp)
     lp
     (if (spec/valid? :lp/program lp)
-      (let [tidy-constraints
-            #(if (map? %) %
-                 (into {} (map-indexed vector %)))
+      (let [flatten-seq
+            (fn flatten-seq [constraints]
+              (if (or (seq? constraints)
+                      (and (vector? constraints)
+                           (coll? (first constraints))))
+                (mapcat flatten-seq constraints)
+                (list constraints)))
             
             {obj :objective min :minimize max :maximize
              subject-to :subject-to
@@ -476,37 +480,30 @@
                                (dissoc :minimize))
                        max (-> (assoc :sense :maximize :objective max)
                                (dissoc :maximize))
-                       constraints (update :constraints tidy-constraints)
-                       subject-to  (-> (update :constraints merge
-                                               (tidy-constraints subject-to))
+                       constraints (update :constraints flatten-seq)
+                       subject-to  (-> (update :constraints concat
+                                               (flatten-seq subject-to))
                                        (dissoc :subject-to))
                        ))
-
+            
             lp (-> lp
                    (update :vars expand-indices)
                    (->> (s/transform [:vars s/MAP-VALS] add-bounds)))
 
             lp (binding [*variables* (:vars lp)]
                  (->> lp
-                      (s/setval [:constraints s/MAP-VALS nil?] s/NONE)
                       (s/transform
-                       [:constraints s/MAP-VALS]
+                       [:constraints s/ALL]
                        (fn [c]
-                         (let [result
-                               (if (and (seq? c) (not (vector? c)))
-                                 (linearize [:and c])
-                                 (linearize c))]
-                           
-                           ;; (when-not (is-logical? result)
-                           ;;   (throw
-                           ;;    (ex-info "Expression in constraints does not have a logic value."
-                           ;;             {:input c
-                           ;;              :result result
-                           ;;              :class (class c)
-                           ;;              })))
-
-                           result
-                           )))
+                         (when c
+                           (let [result
+                                 (if (and (seq? c) (not (vector? c)))
+                                   (linearize [:and c])
+                                   (linearize c))]
+                             (with-meta result {:lp/input c})
+                             ))))
+                      
+                      (s/setval [:constraints s/ALL nil?] s/NONE) ;; remove nils
                       (s/transform [:objective] linearize)))
             ]
 
