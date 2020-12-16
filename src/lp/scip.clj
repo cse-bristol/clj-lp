@@ -157,25 +157,26 @@
                                                         {:line next-line}
                                                         e))))
                  ]
-             {:solution {:exists  (not (#{:unbounded :infeasible} status))
-                         :value   objective-value
-                         :reason  status
-                         :optimal (= status :optimal)}
-              :vars
-              (into {}
-                    (for [line lines]
-                      (let [[x v] (s/split line #" +")
-                            v     (try (Double/parseDouble v)
-                                       (catch Exception e
-                                         (throw (ex-info
-                                                 "Error parsing value line in output"
-                                                 {:line line}
-                                                 e)))
-                                       
-                                       )
-                            x     (get var-index x x)]
-                        [x {:value v}])))
-              })))
+             (cond->
+                 {:solution {:exists  (not (#{:unbounded :infeasible} status))
+                             :reason  status
+                             :optimal (= status :optimal)}
+                  :vars
+                  (into {}
+                        (for [line lines]
+                          (let [[x v] (s/split line #" +")
+                                v     (try (Double/parseDouble v)
+                                           (catch Exception e
+                                             (throw (ex-info
+                                                     "Error parsing value line in output"
+                                                     {:line line}
+                                                     e)))
+                                           
+                                           )
+                                x     (get var-index x x)]
+                            [x {:value v}])))
+                  }
+               (number? objective-value) (assoc-in [:solution :value] objective-value)))))
        (catch Exception e
          (clojure.stacktrace/print-throwable e)
          (println)
