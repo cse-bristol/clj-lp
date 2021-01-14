@@ -323,8 +323,8 @@
           :/ (divide (linearize-args x))
           :- (sub (linearize-args x))
           := (eql (linearize-args x))
-          :<= (less (linearize-args x))
-          :>= (more (linearize-args x))
+          :<= (with-meta (less (linearize-args x)) {:lp/input x})
+          :>= (with-meta (more (linearize-args x)) {:lp/input x})
           :and (logand (linearize-non-nil-args x))
           ::upper (if-let [v (get *variables* (nth x 1))]
                     (linearize (:upper v Double/POSITIVE_INFINITY))
@@ -496,12 +496,9 @@
                        [:constraints s/ALL]
                        (fn [c]
                          (when c
-                           (let [result
-                                 (if (and (seq? c) (not (vector? c)))
-                                   (linearize [:and c])
-                                   (linearize c))]
-                             (with-meta result {:lp/input c})
-                             ))))
+                           (if (and (seq? c) (not (vector? c)))
+                             (linearize [:and c])
+                             (linearize c)))))
                       
                       (s/setval [:constraints s/ALL nil?] s/NONE) ;; remove nils
                       (s/transform [:objective] linearize)))

@@ -269,7 +269,7 @@ quit")
             stats-file  (io/file temp "statistics.txt")
             
             log (s/join "--\n" [out err])
-            cons (vec (:constraints normed-lp))
+            cons (lp/all-constraints normed-lp)
             ]
         (cond
               (not (zero? exit))
