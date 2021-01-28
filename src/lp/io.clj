@@ -2,7 +2,8 @@
   (:require [lp.core :as lp]
             [clojure.java.io :as io]
             [clojure.set :refer [map-invert]]
-            [clojure.string :as s])
+            [clojure.string :as s]
+            [clojure.tools.logging :as log])
   
   (:import [java.nio.file Path Files]))
 
@@ -14,6 +15,8 @@
       (do (io/delete-file f)
           (recur (rest fs))))))
 
+(def ^:dynamic *keep-temp-dir* false)
+
 (defmacro with-temp-dir [var & body]
   `(let [~var (.toFile
                (Files/createTempDirectory
@@ -22,7 +25,9 @@
      (try
        (do ~@body)
        (finally
-         (delete-files ~var)
+         (if *keep-temp-dir*
+           (log/info "Keeping temp dir" ~var)
+           (delete-files ~var))
          ))))
 
 (defmacro doindexed
