@@ -2,9 +2,7 @@
   (:require [lp.core :as lp]
             [clojure.java.io :as io]
             [clojure.set :refer [map-invert]]
-            [clojure.string :as s]
-            [clojure.tools.logging :as log])
-  
+            [clojure.string :as s])
   (:import [java.nio.file Path Files]))
 
 (defn delete-files
@@ -26,7 +24,8 @@
        (do ~@body)
        (finally
          (if *keep-temp-dir*
-           (log/info "Keeping temp dir" ~var)
+           (binding [*out* *err*]
+             (println "Keeping temporary files in" ~var))
            (delete-files ~var))
          ))))
 
