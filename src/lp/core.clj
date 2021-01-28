@@ -322,7 +322,7 @@
           :+ (sum (linearize-args x))
           :/ (divide (linearize-args x))
           :- (sub (linearize-args x))
-          := (eql (linearize-args x))
+          :=  (with-meta (eql (linearize-args x)) {:lp/input x})
           :<= (with-meta (less (linearize-args x)) {:lp/input x})
           :>= (with-meta (more (linearize-args x)) {:lp/input x})
           :and (logand (linearize-non-nil-args x))
