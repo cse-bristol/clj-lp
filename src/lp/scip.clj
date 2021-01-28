@@ -285,7 +285,9 @@ quit")
                     vars (reduce dissoc vars (keys (:vars normed-lp)))
                     ]
                 
-                (for [^String var-name (keys vars)]
+                (for [^String var-name (sort (keys vars))]
                   (let [n (.substring var-name 1 (.indexOf var-name "_" 1))
                         n (Integer/parseInt n)]
-                    (-> (nth cons n) (meta) :lp/input)))))))))
+                    (let [con (nth cons n)]
+                      (:lp/input (meta con) con))
+                    ))))))))
