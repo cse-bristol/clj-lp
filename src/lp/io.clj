@@ -13,7 +13,8 @@
       (do (io/delete-file f)
           (recur (rest fs))))))
 
-(def ^:dynamic *keep-temp-dir* false)
+(def ^:dynamic *keep-temp-dir*
+  (= "true" (System/getProperty "lp.core/*keep-temp-dir*")))
 
 (defmacro with-temp-dir [var & body]
   `(let [~var (.toFile
