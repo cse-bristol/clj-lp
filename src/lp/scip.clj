@@ -120,11 +120,15 @@
           get-double
           (fn [s]
             (try
-              ;; TODO infinity / -infinity
               (let [[_ v] (re-find
-                           #"([+-]?\d+(.\d+)?(e[+-]\d+)?)"
+                           #"(([+-]?infinity)|([+-]?\d+(.\d+)?(e[+-]\d+)?))"
                            s)]
-                (Double/parseDouble v))
+                (cond
+                  (or (= "infinity" v)
+                      (= "infinite" v)) ##Inf
+                  (= "+infinity" v) ##Inf
+                  (= "-infinity" v) ##-Inf
+                  :else (Double/parseDouble v)))
               (catch Exception e))
             )
           ]
@@ -148,6 +152,7 @@
 
          (if (or (not next-line)
                  (= next-line "no-solution-available")
+                 (= next-line "no solution available")
                  (not (.startsWith next-line "objective value:")))
            {:solution {:exists false :reason status}}
            (let [objective-value (s/trim (second (s/split next-line #":")))
@@ -188,22 +193,73 @@
                      :error  (str "Solution parse error: " (.getMessage e)
                                   )}})))
 
-(defn solve [lp & {:keys [scip]
-                   :or {scip "scip"}
-                   :as settings}]
-  (let [{problem-text :program var-index :index-to-var
+(def emphasis-values
+  #{:counter :cpsolver :easycip
+    :feasibility :hardlp :numerics
+    :optimality})
+
+(def presolving-emphasis-values
+  #{:aggressive :default :fast :off})
+
+(def heuristics-emphasis-values
+  #{:aggressive :default :fast :off})
+
+(def ^:dynamic *default-solver-arguments* {:scip "scip"})
+
+(defn solve [lp & {:keys [scip
+                          instructions
+                          presolving-emphasis
+                          heuristics-emphasis
+                          emphasis]
+                   :or   {scip                (:scip *default-solver-arguments*)
+                          instructions        (:instructions *default-solver-arguments*)
+                          presolving-emphasis (:presolving-emphasis *default-solver-arguments*)
+                          heuristics-emphasis (:heuristics-emphasis *default-solver-arguments*)
+                          emphasis            (:emphasis *default-solver-arguments*)}
+                   :as   settings}]
+  {:pre [(or (nil? emphasis)
+             (emphasis-values emphasis))
+         (or (nil? presolving-emphasis)
+             (presolving-emphasis-values presolving-emphasis))
+         (or (nil? heuristics-emphasis)
+             (heuristics-emphasis-values heuristics-emphasis))]}
+  
+  (let [{problem-text  :program var-index :index-to-var
          constant-term :constant-term}
-        (lpio/cplex lp)]
+        (lpio/cplex lp)
+
+        instructions
+        (cond-> instructions
+          presolving-emphasis
+          (conj (str "set presolving emphasis " (name presolving-emphasis)))
+
+          heuristics-emphasis
+          (conj (str "set heuristics emphasis " (name heuristics-emphasis)))
+
+          emphasis
+          (conj (str "set emphasis " (name emphasis))))
+        ]
     (lpio/with-temp-dir temp
       (spit (io/file temp "problem.lp") problem-text)
-      (spit (io/file temp "scip.set") (format-settings (dissoc settings :scip)))
+      (spit (io/file temp "scip.set")
+            (format-settings (dissoc settings
+                                     :scip
+                                     :instructions
+                                     :presolving-emphasis
+                                     :heuristics-emphasis
+                                     :emphasis)))
       (spit (io/file temp "commands.txt")
-            "read problem.lp
-optimize
-set write printzeros true
-write solution solution.txt
-write statistics statistics.txt
-quit")
+            (s/join
+             "\n"
+             `["read problem.lp"
+
+               ~@instructions
+               
+               "optimize"
+               "set write printzeros true"
+               "write solution solution.txt"
+               "write statistics statistics.txt"
+               "quit"]))
       (let [{:keys [exit out err]}
             (sh/sh scip "-s" "scip.set" "-b" "commands.txt" :dir temp)
 
@@ -217,17 +273,17 @@ quit")
               (not (zero? exit))
               {:solution {:exists false
                           :reason :error
-                          :error exit
-                          :log log}}
+                          :error  exit
+                          :log    log}}
 
               (not (.exists output-file))
               {:solution {:exists false
                           :reason :error
-                          :error "No output file created"
-                          :log log}}
+                          :error  "No output file created"
+                          :log    log}}
 
               :else
-              (let [outputs (parse-output-file output-file var-index)
+              (let [outputs    (parse-output-file output-file var-index)
                     statistics (parse-statistics-file stats-file)]
                 (-> outputs
                     (update :solution merge
@@ -236,9 +292,7 @@ quit")
                     ;; SCIP leaves off the constant term in the objective
                     (update-in [:solution :value]
                                (fn [a] (when (and a constant-term)
-                                         (+ a constant-term)))))
-                )
-              )
+                                         (+ a constant-term)))))))
             ]
         (lp/merge-results lp solution)))))
 
