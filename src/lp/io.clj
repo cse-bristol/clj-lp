@@ -26,7 +26,7 @@
        (finally
          (if *keep-temp-dir*
            (binding [*out* *err*]
-             (println "Keeping temporary files in" ~var))
+             (println "Keeping temporary files in" (.getName ~var)))
            (delete-files ~var))
          ))))
 
