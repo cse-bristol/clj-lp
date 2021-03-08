@@ -14,7 +14,7 @@
           (recur (rest fs))))))
 
 (def ^:dynamic *keep-temp-dir*
-  (= "true" (System/getProperty "lp.core/*keep-temp-dir*")))
+  (= "true" (System/getProperty "lp.io/*keep-temp-dir*")))
 
 (defmacro with-temp-dir [var & body]
   `(let [~var (.toFile
