@@ -206,17 +206,17 @@
 
 (def ^:dynamic *default-solver-arguments* {:scip "scip"})
 
-(defn solve [lp & {:keys [scip
-                          instructions
-                          presolving-emphasis
-                          heuristics-emphasis
-                          emphasis]
-                   :or   {scip                (:scip *default-solver-arguments*)
-                          instructions        (:instructions *default-solver-arguments*)
-                          presolving-emphasis (:presolving-emphasis *default-solver-arguments*)
-                          heuristics-emphasis (:heuristics-emphasis *default-solver-arguments*)
-                          emphasis            (:emphasis *default-solver-arguments*)}
-                   :as   settings}]
+(defn solve* [lp {:keys [scip
+                         instructions
+                         presolving-emphasis
+                         heuristics-emphasis
+                         emphasis]
+                  :or   {scip                (:scip *default-solver-arguments*)
+                         instructions        (:instructions *default-solver-arguments*)
+                         presolving-emphasis (:presolving-emphasis *default-solver-arguments*)
+                         heuristics-emphasis (:heuristics-emphasis *default-solver-arguments*)
+                         emphasis            (:emphasis *default-solver-arguments*)}
+                  :as   settings}]
   {:pre [(or (nil? emphasis)
              (emphasis-values emphasis))
          (or (nil? presolving-emphasis)
@@ -295,6 +295,20 @@
                                          (+ a constant-term)))))))
             ]
         (lp/merge-results lp solution)))))
+
+
+(defn solve [lp & {:keys [scip
+                          instructions
+                          presolving-emphasis
+                          heuristics-emphasis
+                          emphasis]
+                   :or   {scip                (:scip *default-solver-arguments*)
+                          instructions        (:instructions *default-solver-arguments*)
+                          presolving-emphasis (:presolving-emphasis *default-solver-arguments*)
+                          heuristics-emphasis (:heuristics-emphasis *default-solver-arguments*)
+                          emphasis            (:emphasis *default-solver-arguments*)}
+                   :as   settings}]
+  (solve* lp settings))
 
 (defn minuc
   "Solves the min unsatisfied constraints version of lp.
