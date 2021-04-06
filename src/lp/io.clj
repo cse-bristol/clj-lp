@@ -172,8 +172,9 @@
        (println "end")
        )}))
 
-(defn nl
-  "Format an nl file for an lp.
+(comment
+  (defn nl
+    "Format an nl file for an lp.
   After https://cfwebprod.sandia.gov/cfdocs/CompResearch/docs/nlwrite20051130.pdf
 
   Return a map having {:program and :vars}
@@ -185,193 +186,193 @@
 
   May not work right - seems to make scipampl die with large programs
   "
-  [lp]
-  ;; precondition - lp is linear?
-  (let [lp (lp/normalize lp)
+    [lp]
+    ;; precondition - lp is linear?
+    (let [lp (lp/normalize lp)
 
-        var-order
-        (vec
-         (sort-by
-          (fn [[_ var]]
-            (case (:type var)
-              :binary 1
-              :integer 2
-              0))
-          (remove (comp :fixed second) (:vars lp))))
-        
-        index-to-var (into {}  (map-indexed vector (map first var-order)))
-        var-to-index (map-invert index-to-var)
+          var-order
+          (vec
+           (sort-by
+            (fn [[_ var]]
+              (case (:type var)
+                :binary 1
+                :integer 2
+                0))
+            (remove (comp :fixed second) (:vars lp))))
+          
+          index-to-var (into {}  (map-indexed vector (map first var-order)))
+          var-to-index (map-invert index-to-var)
 
-        n-vars (count var-order)
-        
-        {n-binary-vars :binary n-integer-vars :integer}
-        (frequencies (map (comp :type second) var-order))
+          n-vars (count var-order)
+          
+          {n-binary-vars :binary n-integer-vars :integer}
+          (frequencies (map (comp :type second) var-order))
 
-        constraints (lp/all-constraints lp)
-        
-        n-constraints       (count constraints)
-        n-objectives        1
-        n-range-constraints 0
-        n-eq-constraints    (count (filter #{:=} (map first constraints)))
-        
-        n-linear-constraints n-constraints
+          constraints (lp/all-constraints lp)
+          
+          n-constraints       (count constraints)
+          n-objectives        1
+          n-range-constraints 0
+          n-eq-constraints    (count (filter #{:=} (map first constraints)))
+          
+          n-linear-constraints n-constraints
 
-        count-variables
-        (fn [x] (count (lp/gradient-double x)))
-        
-        nz-jacobians  (reduce + 0 (for [c constraints] (count-variables (:body c))))
-        gradients     (count-variables (:objective lp))
-        
-        print-gradient
-        (fn [x]
-          (let [gradient (lp/gradient-double x)]
-            (doseq [[x k] gradient]
-              (when-let [i (var-to-index x)]
-                (println i k)))))
+          count-variables
+          (fn [x] (count (lp/gradient-double x)))
+          
+          nz-jacobians  (reduce + 0 (for [c constraints] (count-variables (:body c))))
+          gradients     (count-variables (:objective lp))
+          
+          print-gradient
+          (fn [x]
+            (let [gradient (lp/gradient-double x)]
+              (doseq [[x k] gradient]
+                (when-let [i (var-to-index x)]
+                  (println i k)))))
 
-        print-bound
-        (fn [lb ub thing]
-          (cond
-            (and lb ub (== lb ub))
-            (printf "4 %s\n" lb)
+          print-bound
+          (fn [lb ub thing]
+            (cond
+              (and lb ub (== lb ub))
+              (printf "4 %s\n" lb)
 
-            (and ub (not lb))
-            (printf "1 %s\n" ub)
-            
-            (and lb (not ub))
-            (printf "2 %s\n" lb)
+              (and ub (not lb))
+              (printf "1 %s\n" ub)
+              
+              (and lb (not ub))
+              (printf "2 %s\n" lb)
 
-            (and lb ub)
-            (printf "0 %s %s\n" lb ub)
+              (and lb ub)
+              (printf "0 %s %s\n" lb ub)
 
-            (and (not lb) (not ub))
-            (println "3") ;; free
-            
-            ;; TODO other types
-            :else (throw (ex-info "Bounds type not implemented" {:thing thing}))
-            ))
+              (and (not lb) (not ub))
+              (println "3") ;; free
+              
+              ;; TODO other types
+              :else (throw (ex-info "Bounds type not implemented" {:thing thing}))
+              ))
 
-        count-constraints
-        (fn [var-name]
-          (count (filter
-                  (fn [{body :body}] (contains? (lp/gradient-double body) var-name))
-                  constraints)))
-        ]
-    
-    {:index-to-var index-to-var
-     :var-to-index var-to-index
-     :evaluator
-     (let [obj (:objective lp)
-           C (lp/constant-double obj)
-           G (lp/gradient-double obj)]
-       (if (empty? G)
-         (constantly C)
-         (fn [vars]
-           (cond
-             (empty? vars)
-             nil
+          count-constraints
+          (fn [var-name]
+            (count (filter
+                    (fn [{body :body}] (contains? (lp/gradient-double body) var-name))
+                    constraints)))
+          ]
+      
+      {:index-to-var index-to-var
+       :var-to-index var-to-index
+       :evaluator
+       (let [obj (:objective lp)
+             C (lp/constant-double obj)
+             G (lp/gradient-double obj)]
+         (if (empty? G)
+           (constantly C)
+           (fn [vars]
+             (cond
+               (empty? vars)
+               nil
 
-             (every?
-              number?
-              (map (comp :value vars) (keys G)))
-             (reduce-kv
-              (fn [a x coeff]
-                (+ a (* coeff (:value (vars x)))))
-              C G)
+               (every?
+                number?
+                (map (comp :value vars) (keys G)))
+               (reduce-kv
+                (fn [a x coeff]
+                  (+ a (* coeff (:value (vars x)))))
+                C G)
 
-             :else
-             (do (println "Missing some vars in solution?")
-                 (println "Given: " vars)
-                 (println "Missing: " (remove
-                                       (comp number? :value vars)
-                                       (keys G))))
-             ))))
-     
-     :program
-     (with-out-str
-       (println "g3 1 1 0") ;; I don't know what 3 1 1 0 is
+               :else
+               (do (println "Missing some vars in solution?")
+                   (println "Given: " vars)
+                   (println "Missing: " (remove
+                                         (comp number? :value vars)
+                                         (keys G))))
+               ))))
+       
+       :program
+       (with-out-str
+         (println "g3 1 1 0") ;; I don't know what 3 1 1 0 is
 
-       (doseq [line
-               [[n-vars n-constraints n-objectives n-range-constraints n-eq-constraints]
-                [0 0] ;; nonlinear constraints and objectives
-                [0 0] ;; network constraints
-                [0 0 0] ;; nonlinear variables
-                [0 0 0 1] ;; flags? what's flags?
-                [(or n-binary-vars 0) (or n-integer-vars 0)
-                 0 0 0] ;; discrete vars: binary, int, nonlinear b,c,o
-                [nz-jacobians gradients] ;; gradients is number of vars in objective
-                [0 0] ;; max name lengths
-                [0 0 0 0 0] ;; common expressions
-                ]]
-         (doseq [val line]
-           (print " ")
-           (print val))
-         (println))
+         (doseq [line
+                 [[n-vars n-constraints n-objectives n-range-constraints n-eq-constraints]
+                  [0 0] ;; nonlinear constraints and objectives
+                  [0 0] ;; network constraints
+                  [0 0 0] ;; nonlinear variables
+                  [0 0 0 1] ;; flags? what's flags?
+                  [(or n-binary-vars 0) (or n-integer-vars 0)
+                   0 0 0] ;; discrete vars: binary, int, nonlinear b,c,o
+                  [nz-jacobians gradients] ;; gradients is number of vars in objective
+                  [0 0] ;; max name lengths
+                  [0 0 0 0 0] ;; common expressions
+                  ]]
+           (doseq [val line]
+             (print " ")
+             (print val))
+           (println))
 
-       (doindexed [i constraint constraints]
-         (printf "C%d\n" i)
-         ;; TODO I think this below is wrong, but not a problem
-         (printf "n%s\n" (lp/constant-double (:body constraint)))
-         )
+         (doindexed [i constraint constraints]
+                    (printf "C%d\n" i)
+                    ;; TODO I think this below is wrong, but not a problem
+                    (printf "n%s\n" (lp/constant-double (:body constraint)))
+                    )
 
-       ;; objective sense
-       (printf "O0 %d\n" (if (= :maximize (:sense lp)) 1 0))
+         ;; objective sense
+         (printf "O0 %d\n" (if (= :maximize (:sense lp)) 1 0))
 
-       ;; objective body
-       (printf "n%s\n" (lp/constant-double (:objective lp)))
+         ;; objective body
+         (printf "n%s\n" (lp/constant-double (:objective lp)))
 
-       ;; dual and primal values for variables
-       ;; x2
-       ;; v0 val0
-       ;; v2 val2 ...
-       ;; d1
-       ;; v3 dual3 etc
+         ;; dual and primal values for variables
+         ;; x2
+         ;; v0 val0
+         ;; v2 val2 ...
+         ;; d1
+         ;; v3 dual3 etc
 
-       (println "r # constraint ranges")
-       (doseq [{lb :lower ub :upper :as c} constraints]
-         ;; nlwrite.pdf, table 17
+         (println "r # constraint ranges")
+         (doseq [{lb :lower ub :upper :as c} constraints]
+           ;; nlwrite.pdf, table 17
 
-         ;; 0 l u  => l <= body <= u
-         ;; 1 u => body <= u
-         ;; 2 l => l <= body
-         ;; 3 => free
-         ;; 4 c => body = c
-         ;; 5 k i => body complements vi-1 (what's k)
-         (print-bound lb ub c))
+           ;; 0 l u  => l <= body <= u
+           ;; 1 u => body <= u
+           ;; 2 l => l <= body
+           ;; 3 => free
+           ;; 4 c => body = c
+           ;; 5 k i => body complements vi-1 (what's k)
+           (print-bound lb ub c))
 
-       (println "b # variable bounds")
-       (doseq [[var-name var] var-order]
-         ;; this is also like table 17
-         (let [{lower :lower upper :upper} var]
-           (print-bound lower upper (assoc var :name var-name))))
+         (println "b # variable bounds")
+         (doseq [[var-name var] var-order]
+           ;; this is also like table 17
+           (let [{lower :lower upper :upper} var]
+             (print-bound lower upper (assoc var :name var-name))))
 
-       ;; jacobian sparsity information
-       (printf "k%d # intermediate jacobian col lengths\n"
-               (dec (count var-order)))
-       ;; number of constraints containing var 0
-       ;; number of constraints containing var 1
-       ;; and so on
-       (let [acc (atom 0)]
-         (doseq [[var-name _] (pop var-order)]
-           (let [n (count-constraints var-name)]
-             (println (swap! acc + n)))))
+         ;; jacobian sparsity information
+         (printf "k%d # intermediate jacobian col lengths\n"
+                 (dec (count var-order)))
+         ;; number of constraints containing var 0
+         ;; number of constraints containing var 1
+         ;; and so on
+         (let [acc (atom 0)]
+           (doseq [[var-name _] (pop var-order)]
+             (let [n (count-constraints var-name)]
+               (println (swap! acc + n)))))
 
-       ;; jacobian
-       (doindexed [i constraint constraints]
-         (let [{body :body} constraint]
-           (printf "J%d %d\n" i (count-variables body))
-           (print-gradient body)
+         ;; jacobian
+         (doindexed [i constraint constraints]
+                    (let [{body :body} constraint]
+                      (printf "J%d %d\n" i (count-variables body))
+                      (print-gradient body)
+                      ))
+
+         ;; objective gradients
+         (let [objective (:objective lp)
+               nvars     (count-variables objective)
+               ]
+           (printf "G0 %d\n" nvars)
+           (print-gradient objective)
            ))
-
-       ;; objective gradients
-       (let [objective (:objective lp)
-             nvars     (count-variables objective)
-             ]
-         (printf "G0 %d\n" nvars)
-         (print-gradient objective)
-         ))
-     }
-    ))
+       }
+      )))
 
 (defn sol
   "Read a sol file into some vars
