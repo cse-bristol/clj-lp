@@ -76,9 +76,11 @@
                 (let [i (get var-index x)]
                   (when-not i
                     (throw (ex-info "A variable has appeared in an expression which was not in the variable list" {:variable x})))
-                  (print i)))
-              (when new-lines
-                (print "\n    ")))
+                  (print i))
+
+                (print (if new-lines
+                         "\n    "
+                         " "))))
             
             (when constant-value
                 (let [c (lp/constant-double sum)]
