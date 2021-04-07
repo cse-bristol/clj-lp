@@ -247,7 +247,7 @@
 
 ;; these are for logical expressions, which are a bit different
 
-(defn logand [vals-in]
+(defn logand [input vals-in]
   (if (= 1 (bounded-count 2 vals-in))
     (first vals-in)
     (Conjunction.
@@ -325,7 +325,7 @@
           :=  (with-meta (eql (linearize-args x)) {:lp/input x})
           :<= (with-meta (less (linearize-args x)) {:lp/input x})
           :>= (with-meta (more (linearize-args x)) {:lp/input x})
-          :and (logand (linearize-non-nil-args x))
+          :and (with-meta (logand x (linearize-non-nil-args x)) {:lp/input x})
           ::upper (if-let [v (get *variables* (nth x 1))]
                     (linearize (:upper v Double/POSITIVE_INFINITY))
                     (throw (ex-info "Upper bound for unknown variable" {:expression x})))
