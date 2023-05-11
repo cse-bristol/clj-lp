@@ -62,3 +62,21 @@
              4 true
              }
             switches)))))
+
+(t/deftest test-entirely-false-fixed-variables
+  (let [switches (set (range 5))
+        result (scip/solve
+                {:maximize [:+ (for [x switches] [:switch x])]
+                 :vars {:switch {:indexed-by [switches]
+                                 :value (constantly false)
+                                 :fixed (constantly true)
+                                 :type :binary}}
+                 :subject-to
+                 (list)
+                 })
+
+        switches (-> result :vars :switch :value)
+        
+        ]
+    (t/is #{false} (set (vals switches)))))
+

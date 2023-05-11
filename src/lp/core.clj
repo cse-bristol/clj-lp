@@ -312,11 +312,11 @@
       
       (let [f (nth x 0)
             f (cond
-                (= + f) :+
-                (= * f) :*
-                (= / f) :/
-                (= - f) :-
-                (= = f) :=
+                (= + f)  :+
+                (= * f)  :*
+                (= / f)  :/
+                (= - f)  :-
+                (= = f)  :=
                 (= <= f) :<=
                 (= >= f) :>=
                 true f)]
@@ -542,22 +542,22 @@
                ]
            (cond->
                vars
-             (:value v)
+             (contains? v :value)
              (update-in [var :value] assoc index (:value v))
              
-             (:dual-value v)
+             (contains? v :dual-value)
              (update-in [var :dual-value] assoc index (:dual-value v))
              
-             (:status v)
+             (contains? v :status)
              (update-in [var :status] assoc index (:status v))
 
-             (:fixed v)
+             (contains? v :fixed)
              (update-in [var :fixed] assoc index (:fixed v))
 
-             (:upper v)
+             (contains? v :upper)
              (update-in [var :upper] assoc index (:upper v))
 
-             (:lower v)
+             (contains? v :lower)
              (update-in [var :lower] assoc index (:lower v))
              ))
 
