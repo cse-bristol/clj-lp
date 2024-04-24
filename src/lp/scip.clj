@@ -7,7 +7,8 @@
             [clojure.java.io :as io]
             [clojure.java.shell :as sh]
             [clojure.string :as s]
-            [clojure.test :as test]))
+            [clojure.test :as test]
+            [clojure.string :as string]))
 
 (def scip-setting-keys
   {:time-limit "limits/time"
@@ -209,6 +210,17 @@
 
 (def ^:dynamic *default-solver-arguments* {:scip "scip"})
 
+(defn version [& {:keys [scip] :or {scip "scip"}}]
+  (some->
+   (some->>
+    (sh/sh scip "-v")
+    (:out)
+    (re-find #"SCIP version ([0-9.]+)"))
+   (nth 1)
+   (string/split #"\.")
+   (->> (map parse-long))
+   (vec)))
+
 (defn solve* [lp {:keys [scip
                          instructions
                          presolving-emphasis
@@ -263,9 +275,11 @@
                "write solution solution.txt"
                "write statistics statistics.txt"
                "quit"]))
-      (let [{:keys [exit out err]}
-            (sh/sh scip "-s" "scip.set" "-b" "commands.txt" :dir temp)
+      (let [version (version :scip scip)
 
+            {:keys [exit out err]}
+            (sh/sh scip "-s" "scip.set" "-b" "commands.txt" :dir temp)
+            
             output-file (io/file temp "solution.txt")
             stats-file  (io/file temp "statistics.txt")
             
@@ -292,10 +306,12 @@
                     (update :solution merge
                             {:log log}
                             statistics)
-                    ;; SCIP leaves off the constant term in the objective
-                    (update-in [:solution :value]
-                               (fn [a] (when (and a constant-term)
-                                         (+ a constant-term)))))))
+                    ;; SCIP 7 leaves off the constant term in the objective
+                    ;; SCIP 9 doesn't. Not sure about scip 8.
+                    (cond->
+                        (< (or (first version) 7) 9)
+                        (update-in [:solution :value]
+                                   (fn [a] (when a (+ a (or constant-term 0)))))))))
             ]
         (lp/merge-results lp solution)))))
 
