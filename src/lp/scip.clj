@@ -218,7 +218,7 @@
     (re-find #"SCIP version ([0-9.]+)"))
    (nth 1)
    (string/split #"\.")
-   (->> (map parse-long))
+   (->> (map #(Integer/parseInt %)))
    (vec)))
 
 (defn solve* [lp {:keys [scip
