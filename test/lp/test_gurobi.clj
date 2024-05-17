@@ -1,16 +1,16 @@
 ;; This file is part of THERMOS, copyright © Centre for Sustainable Energy, 2017-2021
 ;; Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 
-(ns lp.test-scip
+(ns lp.test-gurobi
   (:require [clojure.test :as t]
             [lp.diet :refer [diet]]
-            [lp.scip :as scip]))
+            [lp.gurobi :as gurobi]))
 
 (defn- ≅ [a b]
   (< (Math/abs (- a b)) 0.001))
 
 (t/deftest test-diet-result
-  (let [result (scip/solve diet)
+  (let [result (gurobi/solve diet)
         delta (Math/abs (- (:value (:solution result))
                            3.15
                            ))
@@ -24,7 +24,7 @@
 
 (t/deftest test-binary-variables
   (let [switches (set (range 5))
-        result (scip/solve
+        result (gurobi/solve
                 {:maximize [:+ (for [x switches] [:switch x])]
                  :vars {:switch {:indexed-by [switches]
                                  :type :binary}}
@@ -64,7 +64,7 @@
 
 (t/deftest test-entirely-false-fixed-variables
   (let [switches (set (range 5))
-        result (scip/solve
+        result (gurobi/solve
                 {:maximize [:+ (for [x switches] [:switch x])]
                  :vars {:switch {:indexed-by [switches]
                                  :value (constantly false)

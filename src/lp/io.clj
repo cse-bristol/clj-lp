@@ -132,7 +132,7 @@
                (println ">="lb)
 
                (and lb ub)
-               (do (println "=<" ub)
+               (do (println "<=" ub)
                    (print-sum body)
                    (println ">=" lb))))))
 
