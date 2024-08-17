@@ -217,7 +217,7 @@
     (:out)
     (re-find #"SCIP version ([0-9.]+)"))
    (nth 1)
-   (string/split #"\.")
+   (s/split #"\.")
    (->> (map #(Integer/parseInt %)))
    (vec)))
 
