@@ -102,15 +102,15 @@
                 (-> result :SolutionInfo :ObjVal)]}
      :vars vars}))
 
-(defn solve [lp & {:keys [gurobi time-limit mip-gap]
-                   :or   {gurobi "gurobi_cl"}}]
+(defn solve* [lp {:keys [gurobi time-limit mip-gap feasibility-tolerance]
+                  :or   {gurobi "gurobi_cl"}}]
 
   (let [{problem-text :program var-index :index-to-var} (lpio/cplex lp)
         gurobi-parameters
         (cond-> ["ResultFile=solution.json"]
           time-limit (conj (format "TimeLimit=%d" (int time-limit)))
-          mip-gap    (conj (format "MIPGap=%f" (double mip-gap))))
-        
+          mip-gap    (conj (format "MIPGap=%f" (double mip-gap)))
+          feasibility-tolerance    (conj (format "FeasibilityTol=%s" feasibility-tolerance)))
         ]
     (lpio/with-temp-dir temp
       (spit (io/file temp "problem.lp") problem-text)
@@ -146,3 +146,11 @@
                
                })]
         (lp/merge-results lp solution)))))
+
+(defn solve [lp & {:keys [gurobi
+                          time-limit
+                          mip-gap
+                          feasibility-tolerance]
+                   :or {gurobi "gurobi_cl"}
+                   :as settings}]
+  (solve* lp settings))

@@ -7,12 +7,12 @@
             [clojure.java.io :as io]
             [clojure.java.shell :as sh]
             [clojure.string :as s]
-            [clojure.test :as test]
-            [clojure.string :as string]))
+            [clojure.test :as test]))
 
 (def scip-setting-keys
   {:time-limit "limits/time"
-   :mip-gap "limits/gap"})
+   :mip-gap "limits/gap"
+   :feasibility-tolerance "numerics/feastol"})
 
 (defn- extract-double
   {:test
