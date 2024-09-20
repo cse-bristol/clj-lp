@@ -133,13 +133,13 @@
 
 (defn sum [xs]
   (loop [xs     xs
-         constant 0
+         constant 0.0
          grad (transient {})]
     (if (empty? xs)
       (sprod constant (persistent! grad))
       (let [[x & xs] xs]
         (recur xs
-               (+ constant (constant-value x))
+               (+ constant (double (constant-value x)))
                (if (constant? x)
                  grad
                  (reduce-kv
@@ -167,14 +167,14 @@
   
   (defn product [xs]
     (loop [xs       xs
-           constant 1
+           constant 1.0
            grad     {}]
       (if (empty? xs)
         (sprod constant grad) ;; uck
         (let [[x & xs] xs]
           (cond
             (constant? x)
-            (let [k (constant-value x)]
+            (let [k (double (constant-value x))]
               (recur
                xs
                (* constant k)
@@ -182,7 +182,7 @@
 
             (empty? grad)
             (recur xs
-                   (* constant (constant-value x))
+                   (* constant (double (constant-value x)))
                    (grad* (gradient x) constant))
             
             :else

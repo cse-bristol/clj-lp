@@ -50,48 +50,52 @@
 
   Given `lp`, returns {:program \"cplex text\" :vars {0 :x 1 :y etc}
   "
-  [lp & {:keys [comments]}]
+  [lp & {:keys [comments var-names decimals] :or {decimals 5}}]
   (let [lp         (lp/normalize lp)
 
+        df (java.text.DecimalFormat. (str "0." (.repeat "#" decimals)))
+        
         free-vars  (into {} (filter (comp not :fixed second) (:vars lp)))
         var-order  (map-indexed
-                    (fn [i v]
-                      (let [x (str "x_" i "_"
-                                   (.replaceAll (str v) "[^A-Za-z0-9]+" "_"))]
-                        [x v]))
+                    (if var-names
+                      (fn [i v]
+                        (let [x (str "x_" i "_"
+                                    (.replaceAll (str v) "[^A-Za-z0-9]+" "_"))]
+                          [x v]))
+                      (fn [i v] [(format "x_%d" i) v]))
                     (keys free-vars))
         var-rindex (into {} var-order)
         var-index  (map-invert var-rindex)
 
         print-sum
-        (fn [sum & {:keys [constant-value new-lines]}]
+        (fn [^StringBuffer sb sum & {:keys [constant-value new-lines]}]
           (let [grad (lp/gradient-double sum)]
             (doseq [[x k] grad]
               (when-not (zero? k)
                 (if (>= k 0)
-                  (print "+ ")
-                  (print "- "))
+                  (.append sb "+ ")
+                  (.append sb "- "))
                 
-                (when-not (== 1 (Math/abs k))
-                  (print (Math/abs k))
-                  (print " "))
+                (when-not (== 1 (Math/abs (double k)))
+                  (.append sb (.format df (Math/abs (double k))))
+                  (.append sb " "))
                 
                 (let [i (get var-index x)]
                   (when-not i
                     (throw (ex-info "A variable has appeared in an expression which was not in the variable list" {:variable x})))
-                  (print i))
+                  (.append sb (.toString i)))
 
-                (print (if new-lines
-                         "\n    "
-                         " "))))
+                (.append sb (if new-lines
+                              "\n    "
+                              " "))))
             
             (when constant-value
                 (let [c (lp/constant-double sum)]
                   (when-not (zero? c)
                     (if (>= c 0)
-                      (print "+ ")
-                      (print "- "))
-                    (print (Math/abs c)))))))
+                      (.append sb "+ ")
+                      (.append sb "- "))
+                    (.append sb (.format df (Math/abs (double c)))))))))
         ]
 
     {:index-to-var var-rindex
@@ -100,15 +104,14 @@
      :lp lp
      
      :program
-     (with-out-str
-       (print (name (:sense lp)) " ")
-       (print-sum (:objective lp) :constant-value true :new-lines true)
+     (let [sb (StringBuffer.)]
+       (.append sb (name (:sense lp)))
+       (.append sb  " ")
+       (print-sum sb (:objective lp) :constant-value true :new-lines true)
 
        ;; constraints
        (when-let [cons (seq (lp/all-constraints lp))]
-         (println)
-         (println)
-         (println "subject to")
+         (.append sb "\n\nsubject to\n")
          (doseq [[index constraint] (map-indexed vector cons)]
            (let [{body :body ub :upper lb :lower} constraint
                  
@@ -117,62 +120,81 @@
                  ub (and ub (- ub constant-term))
                  ]
              (when comments
-               (println "\\ Constraint " index
-                        "=>" (:input (meta constraint))))
-             (printf "C%d: " index)
-             (print-sum body)
+               (.append sb
+                        (str "\\ Constraint " index
+                             "=>" (:input (meta constraint))
+                             "\n")))
+             (.append sb (format "C%d: " index))
+             (print-sum sb body)
              (cond
                (and ub lb (== ub lb))
-               (println "=" ub)
+               (doto sb
+                 (.append " = ")
+                 (.append (.format df ub))
+                 (.append "\n"))
 
                (and ub (not lb))
-               (println "<=" ub)
+               (doto sb
+                 (.append " <= ")
+                 (.append (.format df ub))
+                 (.append "\n"))
 
                (and lb (not ub))
-               (println ">="lb)
+               (doto sb
+                 (.append " >= ")
+                 (.append (.format df lb))
+                 (.append "\n"))
 
                (and lb ub)
-               (do (println "<=" ub)
-                   (print-sum body)
-                   (println ">=" lb))))))
+               (do (doto sb
+                     (.append "<= ")
+                     (.append (.format df ub))
+                     (.append "\n"))
+                   (print-sum sb body)
+                   (doto sb
+                     (.append ">= ")
+                     (.append (.format df lb))
+                     (.append "\n"))
+                   )))))
 
        ;; variable bounds
-       (println)
-       (println "bounds")
+       (.append sb "\nbounds\n")
        (doseq [[i v] var-order]
          (let [{lb :lower ub :upper} (get (:vars lp) v)]
            (cond
              (and lb ub (== lb ub))
-             (printf "%s = %s\n" i lb)
+             (.append sb (format "%s = %s\n" i (.format df lb)))
 
              (and (not lb) (not ub))
-             (printf "%s free\n" i)
+             (.append sb  (format "%s free\n" i))
 
              (not ub)
-             (printf "%s >= %s\n" i lb)
+             (.append sb (format "%s >= %s\n" i (.format df lb)))
              
              (not lb)
-             (printf "%s <= %s\n" i ub)
+             (.append sb (format "%s <= %s\n" i (.format df ub)))
              
              :else
-             (printf
-              "%s <= %s <= %s\n"
-              lb i ub))))
+             (.append sb (format
+                          "%s <= %s <= %s\n"
+                          (.format df lb) i (.format df ub))))))
 
        ;; variable types
        (let [{int-vars :integer
               bin-vars :binary}
              (group-by (comp :type second) free-vars)]
          (when (seq int-vars)
-           (println "integer")
+           (.append sb "integer\n")
            (doseq [n (map first int-vars)]
-             (printf "%s\n" (get var-index n))))
+             (.append sb (format "%s\n" (get var-index n)))))
          (when (seq bin-vars)
-           (println "binary")
+           (.append sb "binary\n")
            (doseq [n (map first bin-vars)]
-             (printf "%s\n" (get var-index n)))))
+             (.append sb (format "%s\n" (get var-index n))))))
        
-       (println "end")
+       (.append sb "end\n")
+
+       (.toString sb)
        )}))
 
 (comment
