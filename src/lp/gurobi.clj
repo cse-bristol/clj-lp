@@ -96,7 +96,7 @@
                                       " " (:X v)))
                        external-name))
                    
-                   (:X v)])))
+                   {:value (:X v)}])))
 
         status (-> result :SolutionInfo :Status)
         ]
@@ -160,3 +160,4 @@
                    :or {gurobi "gurobi_cl"}
                    :as settings}]
   (solve* lp settings))
+
