@@ -87,8 +87,16 @@
         vars (into
               {}
               (for [v (:Vars result)]
-                [(get variable-index (:VarName v) (:VarName v))
-                 (:X v)]))
+                (let [external-name (:VarName v)]
+                  [(if-let [internal-name (get variable-index external-name)]
+                     internal-name
+                     (do
+                       (.println *err*
+                                 (str "Missing variable against " external-name
+                                      " " (:X v)))
+                       external-name))
+                   
+                   (:X v)])))
 
         status (-> result :SolutionInfo :Status)
         ]
@@ -132,19 +140,17 @@
               {:solution {:exists false
                           :reason :error
                           :error  exit
-                          :log    log}
+                          :log    log}}
+              
+              (not (.exists output-file))
+              {:solution {:exists false
+                          :reason :error
+                          :error  "No output file created"
+                          :log    log}}
 
-               (not (.exists output-file))
-               {:solution {:exists false
-                           :reason :error
-                           :error  "No output file created"
-                           :log    log}}
-
-               :else
-               (let [outputs (parse-output-file output-file var-index)]
-                 (assoc-in outputs [:solution :log] log))
-               
-               })]
+              :else
+              (let [outputs (parse-output-file output-file var-index)]
+                (assoc-in outputs [:solution :log] log)))]
         (lp/merge-results lp solution)))))
 
 (defn solve [lp & {:keys [gurobi
