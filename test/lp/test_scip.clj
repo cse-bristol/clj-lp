@@ -11,16 +11,23 @@
 
 (t/deftest test-diet-result
   (let [result (scip/solve diet)
-        delta (Math/abs (- (:value (:solution result))
-                           3.15
-                           ))
-        vars (:vars result)
-        ]
+        vars (:vars result)]
     (t/is (≅ 3.15 (:value (:solution result))))
     (t/is (≅ 1.94444444 (:value (:corn vars))))
     (t/is (≅ 10.0 (:value (:milk vars))))
     (t/is (≅ 10.0 (:value (:bread vars))))))
 
+(t/deftest test-diet-result-scale
+  (let [result (scip/solve (assoc diet
+                                  :objective-scale 10.0
+                                  :objective-precision 1.0))
+        vars (:vars result)]
+
+    ;; we don't check objective as we will have made that wrong
+    ;; in the use of objective-precision.
+    (t/is (≅ 1.94444444 (:value (:corn vars))))
+    (t/is (≅ 10.0 (:value (:milk vars))))
+    (t/is (≅ 10.0 (:value (:bread vars))))))
 
 (t/deftest test-binary-variables
   (let [switches (set (range 5))

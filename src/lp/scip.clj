@@ -311,7 +311,9 @@
                     (cond->
                         (< (or (first version) 7) 9)
                         (update-in [:solution :value]
-                                   (fn [a] (when a (+ a (or constant-term 0)))))))))
+                                   (fn [a] (when a (+ a (or constant-term 0))))))
+                    (update-in [:solution :value]
+                               * (:objective-scale lp 1.0)))))
             ]
         (lp/merge-results lp solution)))))
 

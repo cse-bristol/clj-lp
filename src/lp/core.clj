@@ -451,6 +451,68 @@
          )))
 
 
+(defn- adjust-precision-and-scale
+  "Update the (already linearized) objective of lp to have a certain scale and precision."
+  [lp]
+  (letfn [(digits [x]
+            (let [r (int
+                     (Math/ceil
+                      (Math/abs
+                       (Math/log10 x))))]
+              (if (< x 1.0) (- r) r)))
+
+          (round-digits [x d]
+            (let [e (Math/pow 10.0 (double d))]
+              (* (bigdec e) (Math/round (/ x e)))))
+          
+          (to-scale [x scale]
+            (if (< x scale)
+              ;; 1sf
+              (round-digits x (digits x))
+              (round-digits x (digits scale))))]
+    
+    (let [objective-scale     (:objective-scale lp 1.0)
+          objective-precision (:objective-precision lp 0.0)
+          objective-precision (/ objective-precision objective-scale)]
+      (cond-> lp
+        (not (== 1.0 objective-scale))
+        (update :objective
+                (fn [objective]
+                  (linearize [:/ objective objective-scale])))
+        
+        (not (== 0.0 objective-precision))
+        (update :objective
+                (let [vars (:vars lp)]
+                  (fn [objective]
+                    (let [g (gradient objective)
+                          c (constant-value objective)]
+                      (->Linear c (into
+                                   {}
+                                   (for [[x k] g] ;; this entry corresponds to k*x in the equation
+                                     (let [var (get vars x)
+                                           ;; this is after expand-indices so the bounds are numbers
+                                           u   (:upper var Double/MAX_VALUE)
+                                           l   (:lower var (- Double/MAX_VALUE))
+
+                                           r     (max (abs u) (abs l))
+                                           ;; we want to round k such that
+                                           ;; | r * k - r * k' | < precision
+                                           ;; or | r * (k - k') | < prec
+                                           ;; r is nonnegative so
+                                           ;; | k - k' | < prec / r
+                                           ;; if k < prec/r then we leave it alone?
+                                           ;; or round it to 1sf?
+                                           ;; say k is 1,234,567
+                                           ;; and prec is 1000
+                                           ;; and r is 1
+                                           ;; prec/r is 1000
+                                           ;; so we round k to nearest 1000
+                                           scale (/ objective-precision r)
+                                           ]
+                                       [x (to-scale k scale)]
+                                       ))))))))
+        ))))
+
 (defn normalize
   "Given `lp`, return a normalized form of it, unless already done.
 
@@ -504,7 +566,8 @@
                              (linearize c)))))
                       
                       (s/setval [:constraints s/ALL nil?] s/NONE) ;; remove nils
-                      (s/transform [:objective] linearize)))
+                      (s/transform [:objective] linearize)
+                      (adjust-precision-and-scale)))
             ]
 
         ;; Convert to normalized program record
