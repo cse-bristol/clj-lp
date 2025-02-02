@@ -494,7 +494,7 @@
                                            u   (:upper var Double/MAX_VALUE)
                                            l   (:lower var (- Double/MAX_VALUE))
 
-                                           r     (max (abs u) (abs l))
+                                           r     (max (Math/abs u) (Math/abs l))
                                            ;; we want to round k such that
                                            ;; | r * k - r * k' | < precision
                                            ;; or | r * (k - k') | < prec
