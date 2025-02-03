@@ -473,7 +473,7 @@
     
     (let [objective-scale     (:objective-scale lp 1.0)
           objective-precision (:objective-precision lp 0.0)
-          objective-precision (/ objective-precision objective-scale)]
+          ]
       (cond-> lp
         (not (== 1.0 objective-scale))
         (update :objective
@@ -495,21 +495,14 @@
                                            l   (:lower var (- Double/MAX_VALUE))
 
                                            r     (max (Math/abs u) (Math/abs l))
-                                           ;; we want to round k such that
-                                           ;; | r * k - r * k' | < precision
-                                           ;; or | r * (k - k') | < prec
-                                           ;; r is nonnegative so
-                                           ;; | k - k' | < prec / r
-                                           ;; if k < prec/r then we leave it alone?
-                                           ;; or round it to 1sf?
-                                           ;; say k is 1,234,567
-                                           ;; and prec is 1000
-                                           ;; and r is 1
-                                           ;; prec/r is 1000
-                                           ;; so we round k to nearest 1000
                                            scale (/ objective-precision r)
+                                           k2    (to-scale k scale)
                                            ]
-                                       [x (to-scale k scale)]
+                                       [x (if (> (Math/abs (- k k2)) objective-precision)
+                                            (do
+                                              (binding [*out* *err*]
+                                                (println "Objective precision adjustment imposisble for" x (Math/abs (- k k2)) objective-precision))
+                                              k) k2)]
                                        ))))))))
         ))))
 
