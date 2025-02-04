@@ -92,12 +92,12 @@
                               " "))))
             
             (when constant-value
-                (let [c (lp/constant-double sum)]
-                  (when-not (zero? c)
-                    (if (>= c 0)
-                      (.append sb "+ ")
-                      (.append sb "- "))
-                    (.append sb (.format df (Math/abs (double c)))))))))
+              (let [c (lp/constant-double sum)]
+                (when-not (zero? c)
+                  (if (>= c 0)
+                    (.append sb "+ ")
+                    (.append sb "- "))
+                  (.append sb (.format df (Math/abs (double c)))))))))
         ]
 
     {:index-to-var var-rindex
