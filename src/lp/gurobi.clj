@@ -84,19 +84,18 @@
 (defn parse-output-file [output-file variable-index]
   (let [result (decode-and-validate output-file)
 
-        vars (into
-              {}
-              (for [v (:Vars result)]
-                (let [external-name (:VarName v)]
-                  [(if-let [internal-name (get variable-index external-name)]
-                     internal-name
-                     (do
-                       (.println *err*
-                                 (str "Missing variable against " external-name
-                                      " " (:X v)))
-                       external-name))
-                   
-                   {:value (:X v)}])))
+        output-vals (->> (:vars result)
+                         (map (juxt :VarName :X))
+                         (into {}))
+        
+        vars (persistent!
+              (reduce-kv
+               (fn [a external-name internal-name]
+                 (assoc!
+                  a internal-name
+                  {:value
+                   (or (get output-vals external-name) 0.0)}))
+               (transient {}) variable-index))
 
         status (-> result :SolutionInfo :Status)
         ]
