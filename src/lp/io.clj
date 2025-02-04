@@ -49,8 +49,10 @@
   https://hpc.nih.gov/apps/glpk/latest/glpk.pdf
 
   Given `lp`, returns {:program \"cplex text\" :vars {0 :x 1 :y etc}
+
+  Excludes the constant term unless :constant-term is given
   "
-  [lp & {:keys [comments var-names decimals] :or {decimals 5}}]
+  [lp & {:keys [comments var-names decimals constant-term] :or {decimals 5}}]
   (let [lp         (lp/normalize lp)
 
         df (java.text.DecimalFormat. (str "0." (.repeat "#" decimals)))
@@ -107,7 +109,7 @@
      (let [sb (StringBuffer.)]
        (.append sb (name (:sense lp)))
        (.append sb  " ")
-       (print-sum sb (:objective lp) :constant-value true :new-lines true)
+       (print-sum sb (:objective lp) :constant-value constant-term :new-lines true)
 
        ;; constraints
        (when-let [cons (seq (lp/all-constraints lp))]
