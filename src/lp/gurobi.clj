@@ -84,7 +84,7 @@
 (defn parse-output-file [output-file variable-index]
   (let [result (decode-and-validate output-file)
 
-        output-vals (->> (:vars result)
+        output-vals (->> (:Vars result)
                          (map (juxt :VarName :X))
                          (into {}))
         
@@ -165,4 +165,3 @@
                    :or {gurobi "gurobi_cl"}
                    :as settings}]
   (solve* lp settings))
-
