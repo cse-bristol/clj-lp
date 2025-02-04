@@ -306,14 +306,9 @@
                     (update :solution merge
                             {:log log}
                             statistics)
-                    ;; SCIP 7 leaves off the constant term in the objective
-                    ;; SCIP 9 doesn't. Not sure about scip 8.
-                    (cond->
-                        (< (or (first version) 7) 9)
-                        (update-in [:solution :value]
-                                   (fn [a] (when a (+ a (or constant-term 0))))))
                     (update-in [:solution :value]
-                               * (:objective-scale lp 1.0)))))
+                               (fn [a] (when a (* (:objective-scale lp 1.0)
+                                                  (+ a (or constant-term 0)))))))))
             ]
         (lp/merge-results lp solution)))))
 

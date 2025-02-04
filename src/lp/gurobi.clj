@@ -113,7 +113,9 @@
 (defn solve* [lp {:keys [gurobi time-limit mip-gap feasibility-tolerance]
                   :or   {gurobi "gurobi_cl"}}]
 
-  (let [{problem-text :program var-index :index-to-var} (lpio/cplex lp)
+  (let [{problem-text :program
+         var-index :index-to-var
+         constant-term :constant-term} (lpio/cplex lp)
         gurobi-parameters
         (cond-> ["ResultFile=solution.json"]
           time-limit (conj (format "TimeLimit=%d" (int time-limit)))
@@ -150,7 +152,11 @@
 
               :else
               (let [outputs (parse-output-file output-file var-index)]
-                (assoc-in outputs [:solution :log] log)))]
+                (-> (assoc-in outputs [:solution :log] log)
+                    (update-in [:solution :value]
+                               (fn [a] (when a (* (:objective-scale lp 1.0)
+                                                  (+ a (or constant-term 0)))))))))]
+        
         (lp/merge-results lp solution)))))
 
 (defn solve [lp & {:keys [gurobi
