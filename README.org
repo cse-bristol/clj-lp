@@ -183,3 +183,22 @@ This can be done with a single indicator
 - y = z.c + m.x
 - x ≤ z . M for sufficient M
 * Things to do
+
+* Development
+
+** Running the tests
+
+#+BEGIN_EXAMPLE
+# run all tests
+$ clj -X:test:test-all
+#+END_EXAMPLE
+
+#+BEGIN_EXAMPLE
+# run "free" tests (tests with no license requirements)
+$ clj -X:test:test-free
+#+END_EXAMPLE
+
+#+BEGIN_EXAMPLE
+# run "paid" tests (tests with paid license requirements, e.g. gurobi)
+$ clj -X:test:test-paid
+#+END_EXAMPLE

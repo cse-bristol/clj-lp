@@ -2,9 +2,8 @@
 ;; Licensed under the Reciprocal Public License v1.5. See LICENSE for licensing details.
 
 (ns lp.test-core
-  (:require [lp.core2 :as sut]
-            [clojure.test :as t]
-            [lp.core :as lp]))
+  (:require [lp.core :as sut]
+            [clojure.test :as t]))
 
 (t/deftest constant-folding
   (let [has-value
@@ -63,7 +62,7 @@
         p (sut/normalize p)
         c (first (sut/all-constraints p))
         ]
-    (t/is (instance? lp.core2.Constraint c))
+    (t/is (instance? lp.core.Constraint c))
     (t/is (zero? (sut/constant-double (:body c))))
     ;; this should either be
     ;; x - y <= 33
