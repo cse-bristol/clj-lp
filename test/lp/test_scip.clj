@@ -4,7 +4,8 @@
 (ns lp.test-scip
   (:require [clojure.test :as t]
             [lp.diet :refer [diet]]
-            [lp.scip :as scip]))
+            [lp.scip :as scip]
+            [lp.ext :as ext]))
 
 (defn- ≅ [a b]
   (< (Math/abs (- a b)) 0.001))
@@ -86,3 +87,48 @@
         ]
     (t/is #{false} (set (vals switches)))))
 
+(t/deftest piecewise-test
+  (t/is
+   (= 7.0
+      (:value (:x (:vars
+                   (scip/solve
+                    {:vars {:y {}
+                            :x {}}
+                     :maximize :y
+                     :subject-to
+                     (list
+                      [:= :y [::ext/piecewise
+                              [[0 10] [4 15] [8 -1]]
+                              :x]]
+                      [:<= :y 13]
+                      )})))))))
+
+(t/deftest if-test
+  (t/testing "simple constants"
+    (-> (scip/solve
+         {:vars {:x {:type :binary}} :maximize [::ext/if :x 10 4]})
+        :vars :x :value
+        (= true)
+        (t/is))
+    (-> (scip/solve
+         {:vars {:x {:type :binary}} :maximize [::ext/if :x 4 10]})
+        :vars :x :value
+        (= false)
+        (t/is)))
+
+  (t/testing "subexpressions"
+    (-> (scip/solve
+         {:vars {:x {:type :binary}
+                 :a {:lower 10 :upper 30}
+                 :b {:lower 3 :upper 9}
+                 :c {:lower 1 :upper 2}}
+          :maximize [::ext/if :x
+                     [:+ [:* :a 3] [:* :b -2] :c]
+                     [:+ [:* :a -1] [:* :b -2] [:* :c 3]]]
+          :subject-to (list [:>= :a :c])
+          })
+        (:vars)
+        (select-keys [:x :a :b :c])
+        (update-vals :value)
+        (= {:x true :a 30.0 :b 3.0 :c 2.0})
+        (t/is))))

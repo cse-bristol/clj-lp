@@ -8,6 +8,8 @@
             [clojure.spec.alpha :as spec]
             [lp.dsl]))
 
+(declare expand-indices)
+
 (defn- singleton? [coll] (and (seq coll) (empty? (rest coll))))
 
 (defprotocol ILinear
@@ -82,17 +84,30 @@
   (constant? [n] true)
   (gradient [n] {}))
 
-(def ^:dynamic *variables* {})
+(def ^:dynamic *variables* nil)
+(def ^:dynamic *generated*
+  "Used to allow program expansion to introduce new variables and constraints.
+  This is less pure than returning more things from ILinearizable, but overall
+  simpler, as otherwise we need a lot of boilerplate for passing stuff back up
+  the stack."
+  nil)
+
+(defn find-var [x]
+  (or (get @*variables* x)
+      (get (:vars @*generated*) x)))
 
 (defn lp-var [x]
-  (if-let [v (get *variables* x)]
+  (if-let [v (find-var x)]    
     (if (or (:fixed v)
             (and (:lower v)
                  (:upper v)
                  (== (:lower v) (:upper v))))
       (linearize (:value v (:lower v)))
       (Linear. 0 {x 1}))
-    (throw (ex-info "Cannot linearize" {:x x}))))
+    (throw (ex-info "Cannot linearize" {:x x
+                                        :vars @*variables*
+                                        :gen (:vars @*generated*)
+                                        }))))
 
 (let [handle
       (fn handle [args out]
@@ -301,13 +316,57 @@
 
 (defn more [vals] (less (reverse vals)))
 
+(defn gen-var
+  "Generate a new unique variable index for use in this LP"
+  []
+  [::gen (:next-var (swap! *generated* update :next-var inc))])
+
+(defmulti linearize-expression
+  "Linearize an expression written in a vector - this is a multimethod
+  to allow extension with new shorthands. The return value will be linearised
+  and can have metadata :vars and :constraints to add vars and constraints
+  into the program."
+  (fn [expression] (first expression)))
+
+(defmethod linearize-expression :default
+  [x] (lp-var x))
+
+(defn bounds
+  "Get the bounds on x, something ILinear, as [lower upper]
+
+  x must already be ILinear, rather than ILinearisable, because calling
+  (linearise x) may have side-effects which mean we don't want to do
+  it more than once (creating vars / constraints).
+
+  This is an unfortunate consequence of implementing that using
+  side-effects rather than keeping it pure."
+  [x]
+  (if (satisfies? ILinear x)
+    (let [c (constant-value x)
+          g (gradient x)]
+      (loop [u c
+             l c
+             g g]
+        (if (seq g)
+          (let [[[x k] & g] g
+                v (find-var x)
+                xu (* k (:upper v Double/POSITIVE_INFINITY))
+                xl (* k (:lower v Double/NEGATIVE_INFINITY))
+                ]
+            (recur
+             (+ u (max xu xl))
+             (+ l (min xu xl))
+             g))
+          [l u])))
+    (throw (ex-info "Cannot get bounds for something that isn't already linear" {:x x}))))
+
 (extend-protocol ILinearizable
   Number
   (linearize [x] x)
 
   clojure.lang.IPersistentVector
   (linearize [x]
-    (if (contains? *variables* x)
+    (if (find-var x)
       (lp-var x)
       
       (let [f (nth x 0)
@@ -329,19 +388,34 @@
           :<= (with-meta (less (linearize-args x)) {:lp/input x})
           :>= (with-meta (more (linearize-args x)) {:lp/input x})
           :and (with-meta (logand x (linearize-non-nil-args x)) {:lp/input x})
-          ::upper (if-let [v (get *variables* (nth x 1))]
+
+          ;; TODO extend upper and lower to compute upper/lower for expressions
+          ::upper (if-let [v (find-var (nth x 1))]
                     (linearize (:upper v Double/POSITIVE_INFINITY))
                     (throw (ex-info "Upper bound for unknown variable" {:expression x})))
-          ::lower (if-let [v (get *variables* (nth x 1))]
+          ::lower (if-let [v (find-var (nth x 1))]
                     (linearize (:lower v Double/NEGATIVE_INFINITY))
                     (throw (ex-info "Upper bound for unknown variable" {:expression x})))
           ::<M ;; x <= x_on * M
           (linearize [:<=
                       (nth x 1)
                       [* (nth x 2) [::upper (nth x 1)]]])
-          
-          (lp-var x)
-          ))))
+
+          (let [result (linearize-expression x)
+                {:keys [vars constraints]} (meta result)]
+            ;; tack on any newly introduced vars and constraints - this has to happen
+            ;; here so we can call linearize below and it will know about our new vars
+            (swap! *generated*
+                   (fn [g]
+                     (assoc g
+                            :vars (merge (:vars g)
+                                         (->>
+                                          (expand-indices vars)
+                                          (s/transform [s/MAP-VALS] add-bounds)))
+                            :constraints (into (:constraints g) constraints))))
+            ;; try again, so that linearize-expression can just return another expression
+            ;; and we will process it here.
+            (linearize result))))))
 
   Object
   (linearize [x] (lp-var x))
@@ -472,8 +546,7 @@
               (round-digits x (digits scale))))]
     
     (let [objective-scale     (:objective-scale lp 1.0)
-          objective-precision (:objective-precision lp 0.0)
-          ]
+          objective-precision (:objective-precision lp 0.0)]
       (cond-> lp
         (not (== 1.0 objective-scale))
         (update :objective
@@ -513,6 +586,7 @@
   - Variable names are the same
   - The objective and constraints are, where possible, transformed into a sumproduct
   - Constraints are not fixed up for canonical form
+  - Nonlinear features have been converted into linear ones
   "
   [lp]
   (if (instance? Program lp)
@@ -548,23 +622,40 @@
                    (update :vars expand-indices)
                    (->> (s/transform [:vars s/MAP-VALS] add-bounds)))
 
-            lp (binding [*variables* (:vars lp)]
-                 (->> lp
-                      (s/transform
-                       [:constraints s/ALL]
-                       (fn [c]
-                         (when c
-                           (if (and (seq? c) (not (vector? c)))
-                             (linearize [:and c])
-                             (linearize c)))))
-                      
-                      (s/setval [:constraints s/ALL nil?] s/NONE) ;; remove nils
-                      (s/transform [:objective] linearize)
-                      (adjust-precision-and-scale)))
-            ]
+            lp (binding [*variables* (atom (:vars lp))
+                         *generated* (atom {:next-var 0
+                                            :vars {}
+                                            :constraints nil})]
+                 ;; we iterate on expanding the LP until nothing has produced any extra constraints
+                 (-> (loop [lp lp]
+                       (let [lp
+                             (->> lp
+                                  (s/transform
+                                   [:constraints s/ALL]
+                                   (fn [c]
+                                     (when c
+                                       (if (and (seq? c) (not (vector? c)))
+                                         (linearize [:and c])
+                                         (linearize c)))))
+                                  
+                                  (s/setval [:constraints s/ALL nil?] s/NONE) ;; remove nils
+                                  (s/transform [:objective] linearize))
+                             ]
+                         (let [{gen-vars :vars gen-cons :constraints} @*generated*]
+                           (swap! *generated* assoc :vars {} :constraints nil)
+                           ;; add in new variables and constraints
+                           
+                           (let [lp (-> (update lp :vars merge gen-vars)
+                                        (update :constraints into gen-cons))]
+                             ;; keep going if we made any new constraints
+                             ;; this may not be needed but it can't hurt
+                             (swap! *variables* merge (:vars lp))
+                             (cond-> lp (seq gen-cons) (recur))))))
+                     (adjust-precision-and-scale)))]
 
         ;; Convert to normalized program record
         (map->Program lp))
+      
       (throw (ex-info
               "Invalid linear program"
               {:explain-data (spec/explain-data :lp/program lp)
