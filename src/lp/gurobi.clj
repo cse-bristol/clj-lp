@@ -5,7 +5,7 @@
   (:require [lp.core :as lp]
             [lp.io :as lpio]
             [clojure.java.io :as io]
-            [clojure.java.shell :as sh]
+            [lp.proc :as proc]
             [clojure.string :as s]
             [clojure.data.json :as json]
             [malli.core :as m]
@@ -125,11 +125,7 @@
       (spit (io/file temp "problem.lp") problem-text)
 
       (let [{:keys [exit out err]}
-            (apply sh/sh
-                   `[~gurobi
-                     ~@gurobi-parameters
-                     "problem.lp"
-                     :dir ~temp])
+            (proc/run `[~gurobi ~@gurobi-parameters "problem.lp"] :dir temp)
 
             output-file (io/file temp "solution.json")
 

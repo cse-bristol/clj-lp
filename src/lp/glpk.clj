@@ -5,7 +5,7 @@
   (:require [lp.core :as lp]
             [lp.io :as lpio :refer [with-temp-dir]]
             [clojure.java.io :as io]
-            [clojure.java.shell :as sh]
+            [lp.proc :as proc]
             [clojure.string :as s]))
 
 (let [var-status-codes
@@ -98,9 +98,9 @@
         result-text
         (with-temp-dir temp-dir
           (spit (io/file temp-dir "problem") problem-text)
-          (sh/sh
-           "glpsol" "--lp" "problem" "--write" "solution"
-           :dir temp-dir)
+          (proc/run
+            ["glpsol" "--lp" "problem" "--write" "solution"]
+            :dir temp-dir)
           (slurp (io/file temp-dir "solution")))
 
         result (glpsol result-text var-index)]

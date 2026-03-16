@@ -92,12 +92,12 @@
   the stack."
   nil)
 
-(defn find-var [x]
+(defn lookup-var [x]
   (or (get @*variables* x)
       (get (:vars @*generated*) x)))
 
 (defn lp-var [x]
-  (if-let [v (find-var x)]    
+  (if-let [v (lookup-var x)]    
     (if (or (:fixed v)
             (and (:lower v)
                  (:upper v)
@@ -331,6 +331,17 @@
 (defmethod linearize-expression :default
   [x] (lp-var x))
 
+(defn add-bounds [var]
+  (try (cond-> var
+         (= (:type var) :non-negative)
+         (update :lower (fn [l] (max (or l 0) 0)))
+         
+         (= (:type var) :binary)
+         (assoc :lower 0 :upper 1))
+       (catch Exception e
+         (throw (ex-info "Adding bounds to var" {:var var} e))
+         )))
+
 (defn bounds
   "Get the bounds on x, something ILinear, as [lower upper]
 
@@ -349,7 +360,7 @@
              g g]
         (if (seq g)
           (let [[[x k] & g] g
-                v (find-var x)
+                v (lookup-var x)
                 xu (* k (:upper v Double/POSITIVE_INFINITY))
                 xl (* k (:lower v Double/NEGATIVE_INFINITY))
                 ]
@@ -366,7 +377,7 @@
 
   clojure.lang.IPersistentVector
   (linearize [x]
-    (if (find-var x)
+    (if (lookup-var x)
       (lp-var x)
       
       (let [f (nth x 0)
@@ -390,10 +401,10 @@
           :and (with-meta (logand x (linearize-non-nil-args x)) {:lp/input x})
 
           ;; TODO extend upper and lower to compute upper/lower for expressions
-          ::upper (if-let [v (find-var (nth x 1))]
+          ::upper (if-let [v (lookup-var (nth x 1))]
                     (linearize (:upper v Double/POSITIVE_INFINITY))
                     (throw (ex-info "Upper bound for unknown variable" {:expression x})))
-          ::lower (if-let [v (find-var (nth x 1))]
+          ::lower (if-let [v (lookup-var (nth x 1))]
                     (linearize (:lower v Double/NEGATIVE_INFINITY))
                     (throw (ex-info "Upper bound for unknown variable" {:expression x})))
           ::<M ;; x <= x_on * M
@@ -513,16 +524,7 @@
      {} vars)))
 
 
-(defn add-bounds [var]
-  (try (cond-> var
-         (= (:type var) :non-negative)
-         (update :lower (fn [l] (max (or l 0) 0)))
-         
-         (= (:type var) :binary)
-         (assoc :lower 0 :upper 1))
-       (catch Exception e
-         (throw (ex-info "Adding bounds to var" {:var var} e))
-         )))
+
 
 
 (defn- adjust-precision-and-scale

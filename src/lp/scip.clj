@@ -5,7 +5,7 @@
   (:require [lp.core :as lp]
             [lp.io :as lpio]
             [clojure.java.io :as io]
-            [clojure.java.shell :as sh]
+            [lp.proc :as proc]
             [clojure.string :as s]
             [clojure.set :refer [map-invert]]
             [clojure.test :as test]))
@@ -214,7 +214,7 @@
 (defn version [& {:keys [scip] :or {scip "scip"}}]
   (some->
    (some->>
-    (sh/sh scip "-v")
+    (proc/run [scip  "-v"])
     (:out)
     (re-find #"SCIP version ([0-9.]+)"))
    (nth 1)
@@ -338,7 +338,7 @@
       (let [version (version :scip scip)
 
             {:keys [exit out err]}
-            (sh/sh scip "-s" "scip.set" "-b" "commands.txt" :dir temp)
+            (proc/run [scip "-s" "scip.set" "-b" "commands.txt"] :dir temp)
             
             output-file (io/file temp "solution.txt")
             stats-file  (io/file temp "statistics.txt")
@@ -408,7 +408,7 @@ write solution solution.txt
 write statistics statistics.txt
 quit")
       (let [{:keys [exit out err]}
-            (sh/sh scip "-s" "scip.set" "-b" "commands.txt" :dir temp)
+            (proc/run [scip "-s" "scip.set" "-b" "commands.txt"] :dir temp)
 
             output-file (io/file temp "solution.txt")
             stats-file  (io/file temp "statistics.txt")
