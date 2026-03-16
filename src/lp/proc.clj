@@ -18,7 +18,7 @@
 
 (defn run [cmd-args & {:keys [dir env]
             :or {env (into {} (System/getenv))
-                 dir ""}}]
+                 dir (.getCanonicalPath (io/as-file ""))}}]
   (let [proc (.exec (Runtime/getRuntime) 
                     ^"[Ljava.lang.String;" (into-array cmd-args)
                     (as-env-strings env)
@@ -35,4 +35,7 @@
         (.destroy proc)
         (throw e)))))
 
-
+(comment
+  
+  
+  )
