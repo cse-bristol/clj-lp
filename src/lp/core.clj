@@ -734,6 +734,15 @@
 
             true value)))))
 
+(defn empty-indexes?
+  "Used to tell whether a variable actually doesn't exist because its index set
+  is empty"
+  [var]
+  (when (contains? var :indexed-by)
+    (let [indexes (:indexed-by var)]
+      (or (empty? indexes) ;; directly empty
+          (and (vector? indexes) (some empty? indexes)))))) ;; empty cartesian product
+
 (defn merge-results
   "Add results back onto an lp.
   If the original lp is not normalized it might have vars that are :indexed-by
@@ -743,8 +752,13 @@
 
   (let [result-vars (collapse-indices (:vars lp) (:vars result))]
     (-> lp
-        (update :vars #(fix-var-types
-                        (merge-with merge %1 %2)) result-vars)
+        (update :vars
+                (fn [in-vars]
+                  (let [in-vars (s/setval [s/MAP-VALS
+                                           (s/pred empty-indexes?)
+                                           :value] s/NONE in-vars)
+                        merged-vars (merge-with merge in-vars result-vars)]
+                    (fix-var-types merged-vars))))
         (assoc :solution (:solution result)))))
 
 (defn gradient-double
