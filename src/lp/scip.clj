@@ -211,16 +211,24 @@
 
 (def ^:dynamic *default-solver-arguments* {:scip "scip"})
 
-(defn version [& {:keys [scip] :or {scip "scip"}}]
-  (some->
-   (some->>
-    (proc/run [scip  "-v"])
-    (:out)
-    (re-find #"SCIP version ([0-9.]+)"))
-   (nth 1)
-   (s/split #"\.")
-   (->> (map #(Integer/parseInt %)))
-   (vec)))
+(def ^:private version*
+  (memoize
+   (fn [scip]
+     (some->
+      (some->>
+       (proc/run [scip  "-v"])
+       (:out)
+       (re-find #"SCIP version ([0-9.]+)"))
+      (nth 1)
+      (s/split #"\.")
+      (->> (map #(Integer/parseInt %)))
+      (vec)))))
+
+(defn version
+  "The version of the `scip` binary, as [major minor tech].
+  Memoized on the binary path."
+  [& {:keys [scip] :or {scip "scip"}}]
+  (version* scip))
 
 (defn partsol
   "Write a string that the SCIP MST reader can read
