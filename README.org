@@ -150,6 +150,18 @@ These will return the input LP, but amended so that
 2. The ~:vars~ contain ~:value~ keys with their solution values. For glpk, other information is also returned on ~:vars~.
    If your vars use ~:indexed-by~, the output variables are collected back up and put into a map, so the value for ~[:x 1]~ is at
    ~(-> lp :vars :x :value (get 1))~
+** SCIP in-process
+~lp.jscip/solve~ and ~lp.jscip/minuc~ work like their ~lp.scip~ equivalents, but call libscip directly through JNA rather than running the ~scip~ binary.
+There are no temporary LP files, coefficients are not rounded to ~:decimals~, and interrupting the calling thread stops the solver.
+~:instructions~ is not supported, as there is no SCIP shell.
+
+This needs a shared ~libscip~, which is found from ~:library~ in ~lp.jscip/*default-solver-arguments*~, the ~lp.jscip.library~ system property, the ~SCIP_LIBRARY~ environment variable, or JNA's usual search for ~scip~.
+On nix the ~scipoptsuite~ binary is statically linked, but ~scipopt-scip~ provides the library:
+
+#+begin_src sh
+export SCIP_LIBRARY=$(nix build --no-link --print-out-paths nixpkgs#scipopt-scip)/lib/libscip.so
+clojure -X:test:test-jscip
+#+end_src
 * Tricks
 Useful tricks in LP construction, which could be rolled in:
 ** Computing logic functions
