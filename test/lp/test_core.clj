@@ -30,7 +30,7 @@
     (has-value 1 [:/ [:- 1] -1])
     (has-value 0.5 [:/ 1 2])
 
-    (binding [sut/*variables* {:a {:value 10 :fixed true}}]
+    (binding [sut/*variables* (atom {:a {:value 10 :fixed true}})]
       (has-value 10 :a)
       (has-value 20 [:* 2 :a])
       (has-value 0 [:- :a :a])

@@ -93,8 +93,8 @@
   nil)
 
 (defn lookup-var [x]
-  (or (get @*variables* x)
-      (get (:vars @*generated*) x)))
+  (or (some-> *variables* deref (get x))
+      (some-> *generated* deref :vars (get x))))
 
 (defn lp-var [x]
   (if-let [v (lookup-var x)]    
