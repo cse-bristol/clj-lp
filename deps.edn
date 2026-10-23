@@ -11,7 +11,7 @@
          :extra-deps {io.github.cognitect-labs/test-runner
                       {:git/tag "v0.5.1" :git/sha "dfb30dd"}}
          :exec-fn cognitect.test-runner.api/test}
-  :test-free {:exec-args {:patterns ["^lp\\.test-(core|minuc|scip|diagnostics)$"]}}
+  :test-free {:exec-args {:patterns ["^lp\\.test-(core|minuc|scip|diagnostics|gurobi-stub)$"]}}
   :test-jscip {:exec-args {:patterns ["^lp\\.test-jscip$"]}}
   :test-paid {:exec-args {:patterns ["^lp\\.test-gurobi$"]}}
   :test-all {:exec-args {:patterns ["^lp\\.test-.*"]}}

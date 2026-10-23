@@ -132,3 +132,15 @@
         (update-vals :value)
         (= {:x true :a 30.0 :b 3.0 :c 2.0})
         (t/is))))
+
+(t/deftest test-warm-start-from-solution
+  ;; binary values read back from a solution are booleans, and warm
+  ;; starting from them should work like warm starting from numbers
+  (let [switches (set (range 5))
+        program  {:maximize [:+ (for [x switches] [:switch x])]
+                  :vars {:switch {:indexed-by [switches] :type :binary}}
+                  :subject-to (list [:<= [:+ (for [x switches] [:switch x])] 3])}
+        first    (scip/solve program)
+        second   (scip/solve first :warm-start? true)]
+    (t/is (boolean? (-> first :vars :switch :value (get 0))))
+    (t/is (≅ 3.0 (:value (:solution second))))))

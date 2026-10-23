@@ -267,7 +267,7 @@
      :partial
      (let [sb (StringBuffer.)]
        (doseq [[i v] var-order
-               :let [{:keys [value]} (get (:vars lp) v)]
+               :let [value (lpio/start-value (:value (get (:vars lp) v)))]
                :when value
                :let [value (.format df value)]]
          (.append sb (format "%s %s\n" i value)))

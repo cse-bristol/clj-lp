@@ -109,20 +109,44 @@
                 (-> result :SolutionInfo :ObjVal)]}
      :vars vars}))
 
-(defn solve* [lp {:keys [gurobi time-limit mip-gap feasibility-tolerance]
+(defn- warm-start-enabled?
+  "Warm starting gurobi is untested against a real gurobi_cl, so it only
+  happens if the environment variable LP_GUROBI_WARM_START is true or 1."
+  []
+  (contains? #{"true" "1"} (System/getenv "LP_GUROBI_WARM_START")))
+
+(defn- has-discrete-vars? [{:keys [lp index-to-var]}]
+  (some #(#{:binary :integer} (:type (get (:vars lp) %)))
+        (vals index-to-var)))
+
+(defn solve* [lp {:keys [gurobi time-limit mip-gap feasibility-tolerance
+                         warm-start?]
                   :or   {gurobi "gurobi_cl"}}]
 
   (let [{problem-text :program
          var-index :index-to-var
-         constant-term :constant-term} (lpio/cplex lp)
+         constant-term :constant-term
+         :as cplex} (lpio/cplex lp)
+
+        ;; gurobi reads a MIP start from InputFile; for a program with no
+        ;; discrete vars there is nothing to start.
+        mip-start
+        (when (and warm-start?
+                   (warm-start-enabled?)
+                   (has-discrete-vars? cplex))
+          (not-empty (lpio/mip-start cplex)))
+
         gurobi-parameters
         (cond-> ["ResultFile=solution.json"]
           time-limit (conj (format "TimeLimit=%d" (int time-limit)))
           mip-gap    (conj (format "MIPGap=%f" (double mip-gap)))
-          feasibility-tolerance    (conj (format "FeasibilityTol=%s" feasibility-tolerance)))
+          feasibility-tolerance    (conj (format "FeasibilityTol=%s" feasibility-tolerance))
+          mip-start  (conj "InputFile=start.mst"))
         ]
     (lpio/with-temp-dir temp
       (spit (io/file temp "problem.lp") problem-text)
+      (when mip-start
+        (spit (io/file temp "start.mst") mip-start))
 
       (let [{:keys [exit out err]}
             (proc/run `[~gurobi ~@gurobi-parameters "problem.lp"] :dir temp)
@@ -157,7 +181,8 @@
 (defn solve [lp & {:keys [gurobi
                           time-limit
                           mip-gap
-                          feasibility-tolerance]
+                          feasibility-tolerance
+                          warm-start?]
                    :or {gurobi "gurobi_cl"}
                    :as settings}]
   (solve* lp settings))

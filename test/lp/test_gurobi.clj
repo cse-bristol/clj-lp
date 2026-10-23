@@ -79,3 +79,17 @@
         ]
     (t/is #{false} (set (vals switches)))))
 
+
+(t/deftest test-warm-start
+  ;; only meaningful with LP_GUROBI_WARM_START=1 in the environment;
+  ;; checks gurobi accepts the start file and says it loaded it.
+  (let [switches (set (range 5))
+        program  {:maximize [:+ (for [x switches] [:switch x])]
+                  :vars {:switch {:indexed-by [switches] :type :binary}}
+                  :subject-to (list [:<= [:+ (for [x switches] [:switch x])] 3])}
+        first    (gurobi/solve program)
+        second   (gurobi/solve first :warm-start? true)]
+    (t/is (≅ 3.0 (:value (:solution second))))
+    (when (#{"true" "1"} (System/getenv "LP_GUROBI_WARM_START"))
+      (t/is (re-find #"(?i)MIP start" (:log (:solution second)))
+            "gurobi's log should mention the MIP start"))))

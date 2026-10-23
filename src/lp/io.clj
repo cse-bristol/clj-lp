@@ -401,6 +401,30 @@
        }
       )))
 
+(defn start-value
+  "The :value of a var as a number for a start file, or nil if it has none.
+  Binary values read back from a solution are booleans, so these become 1 or 0."
+  [value]
+  (cond
+    (true? value)  1.0
+    (false? value) 0.0
+    (and (number? value)
+         (Double/isFinite (double value))) (double value)))
+
+(defn mip-start
+  "Given the output of `cplex`, write the :value of its free vars as a
+  start file: a line of `name value` for each var with a value, using the
+  names in the cplex program. This is the MST format read by SCIP and
+  Gurobi; vars without a value are left out, giving a partial start."
+  [{:keys [lp index-to-var]} & {:keys [decimals] :or {decimals 5}}]
+  (let [df (java.text.DecimalFormat. (str "0." (.repeat "#" decimals)))
+        sb (StringBuilder.)]
+    (doseq [[x v] (sort-by key index-to-var)
+            :let [value (start-value (:value (get (:vars lp) v)))]
+            :when value]
+      (.append sb (format "%s %s\n" x (.format df value))))
+    (.toString sb)))
+
 (defn sol
   "Read a sol file into some vars
   Sol files are not well-documented
